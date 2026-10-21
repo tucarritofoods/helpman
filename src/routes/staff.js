@@ -45,7 +45,7 @@ router.post('/', ah(async (req, res) => {
   const link = `${process.env.PUBLIC_URL || 'http://localhost:3000'}/auth.html?reset=${token}`;
   await notify({
     to: email,
-    subject: 'You were added to the General Handyman Solutions team',
+    subject: 'You were added to the Helpman team',
     html: shell('Welcome to the team', `Hi ${b.name.trim().split(' ')[0]}, you were added as ${b.staff_role}. Set your password within 24 hours:`, [['Set password', link]]),
   }).catch(() => {});
   await auditLog(req.user.id, 'staff.invited', 'users', info.lastInsertRowid, `${email} as ${b.staff_role}`);

@@ -115,7 +115,7 @@ router.post('/employees', authRequired, requireStaff('staff'), ah(async (req, re
   await auditLog(req.user.id, 'contractor.employee_created', 'contractors', contractorId, `${email} — company technician, verification covered by the company`);
   const link = `${process.env.PUBLIC_URL || 'http://localhost:3000'}/auth.html?reset=${token}`;
   await notify({
-    to: email, subject: 'Your technician account at General Handyman Solutions',
+    to: email, subject: 'Your technician account at Helpman',
     html: shell('Welcome to the team', `Hi ${b.name.trim().split(' ')[0]}, your technician account is ready. Set your password within 24 hours:`, [['Set password', link]]),
   }).catch(() => {});
   res.status(201).json({ id: contractorId, user_id: userId, provider_type: 'employee', status: 'active' });

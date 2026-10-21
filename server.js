@@ -313,7 +313,7 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
 });
 
 boot.then(() => app.listen(PORT, () => {
-  console.log(`General Handyman Solutions listening on http://localhost:${PORT}`);
+  console.log(`Helpman by Mendoza Capital LLC listening on http://localhost:${PORT}`);
   console.log(`Mail: provider=${mailer.activeProvider()} from="${mailer.FROM_NAME} <${mailer.FROM_EMAIL}>"`);
   if (mailer.activeProvider() === 'console') {
     console.log('Mail is in LOG mode: campaigns are recorded in email_log, nothing is really sent. See README "Business email setup".');

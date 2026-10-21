@@ -40,7 +40,7 @@ function shell(title, intro, rows) {
     <h2 style="margin:8px 0 4px;">${esc(title)}</h2>
     <p style="color:#475569;">${esc(intro)}</p>
     ${rowHtml ? `<table>${rowHtml}</table>` : ''}
-    <p style="color:#94a3b8;font-size:12px;margin-top:24px;">This is an automated notification from General Handyman Solutions. Please do not reply directly — message us from your portal instead.</p>
+    <p style="color:#94a3b8;font-size:12px;margin-top:24px;">This is an automated notification from Helpman by Mendoza Capital LLC. Please do not reply directly — message us from your portal instead.</p>
   </body></html>`;
 }
 
@@ -79,7 +79,7 @@ function brandShell(title, intro, bodyHtml) {
   <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;padding:32px 16px;">
     <div style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(16,36,63,.08);">
       <div style="padding:30px 32px 6px;text-align:center;">
-        <img src="${logoUrl()}" alt="Helpman — General Handyman Solutions" style="max-width:280px;width:100%;height:auto;display:block;margin:0 auto;">
+        <img src="${logoUrl()}" alt="Helpman by Mendoza Capital LLC" style="max-width:280px;width:100%;height:auto;display:block;margin:0 auto;">
       </div>
       <div style="padding:6px 36px 10px;">
         <h2 style="color:#143d7a;font-size:22px;line-height:1.35;margin:0 0 12px;">${title}</h2>
@@ -87,7 +87,7 @@ function brandShell(title, intro, bodyHtml) {
         ${bodyHtml || ''}
       </div>
       <div style="background:#f6f8fb;border-top:1px solid #e2e8f0;padding:16px 36px;">
-        <p style="color:#8a97a5;font-size:12px;line-height:1.6;margin:0;">This is an automated notification from General Handyman Solutions. Please do not reply directly &mdash; message us from your portal instead.</p>
+        <p style="color:#8a97a5;font-size:12px;line-height:1.6;margin:0;">This is an automated notification from Helpman by Mendoza Capital LLC. Please do not reply directly &mdash; message us from your portal instead.</p>
       </div>
     </div>
     <p style="text-align:center;color:#8a97a5;font-size:12px;margin:18px 0 0;letter-spacing:.02em;">Home projects, handled.</p>
@@ -162,7 +162,7 @@ function techAssignedCustomer({ customerName, techName, photoUrl, projectId, ser
 // Job-offer email to the contractor with one-click accept / decline.
 function jobOfferContractor({ name, projectId, serviceType, address, budget, acceptUrl, declineUrl, expiresNote }) {
   return brandShell(`New job offer &mdash; ${esc(serviceType)} (#${esc(String(projectId))})`,
-    `<p style="margin:0;">Hi <strong>${esc(name)}</strong>, General Handyman Solutions is offering you a project.${expiresNote ? ` <strong>${esc(expiresNote)}</strong>` : ''}</p>`,
+    `<p style="margin:0;">Hi <strong>${esc(name)}</strong>, Helpman by Mendoza Capital LLC is offering you a project.${expiresNote ? ` <strong>${esc(expiresNote)}</strong>` : ''}</p>`,
     `<table style="margin:16px 0;border-collapse:collapse;" cellpadding="0" cellspacing="0"><tbody>`
     + kvRow('Project', `#${esc(String(projectId))} &mdash; ${esc(serviceType)}`)
     + kvRow('Address', esc(address))

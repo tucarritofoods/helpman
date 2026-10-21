@@ -3,8 +3,8 @@
 // the version is stored with every acceptance as legal proof.
 const db = require('../db');
 
-const CLIENT_TERMS_VERSION = '2026-10-05';
-const CONTRACTOR_TERMS_VERSION = '2026-10-05';
+const CLIENT_TERMS_VERSION = '2026-10-20';
+const CONTRACTOR_TERMS_VERSION = '2026-10-20';
 
 async function recordAcceptance({ userId, kind, referenceId, version, ip }) {
   // SQLite: INSERT OR IGNORE. PostgreSQL: ON CONFLICT DO NOTHING.
