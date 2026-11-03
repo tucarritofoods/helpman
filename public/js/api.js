@@ -310,7 +310,65 @@ const HP = (() => {
   }
   function photoUrl(filename) { return '/api/photos/' + encodeURIComponent(filename); }
 
+  // ---------- accessibility + small screens (Corte 6.3) ----------
+  // Runs on every page and on content added later (tabs, modals, tables built from API data):
+  //  • a .field whose <label> has no "for" is tied to its control (screen readers read the label);
+  //  • tables get data-label on each cell, so on phones they stack into readable cards (CSS);
+  //  • role="tablist": arrow keys / Home / End move between tabs, aria-selected follows the active tab;
+  //  • an open modal keeps keyboard focus inside it (Tab / Shift+Tab wrap around).
+  let a11ySeq = 0;
+  function enhance(root) {
+    root = root || document;
+    root.querySelectorAll('.field').forEach((f) => {
+      const lab = f.querySelector(':scope > label');
+      const ctl = f.querySelector(':scope > input:not([type=hidden]), :scope > select, :scope > textarea');
+      if (!lab || !ctl || lab.htmlFor || lab.contains(ctl)) return;
+      if (!ctl.id) ctl.id = 'hp-f-' + (++a11ySeq);
+      lab.htmlFor = ctl.id;
+    });
+    root.querySelectorAll('table').forEach((t) => {
+      const heads = [...t.querySelectorAll('thead th')].map((th) => th.textContent.trim());
+      if (!heads.length) return;
+      t.classList.add('stackable');
+      t.querySelectorAll('tbody tr').forEach((tr) => [...tr.children].forEach((td, i) => { if (!td.dataset.label && heads[i]) td.dataset.label = heads[i]; }));
+    });
+    root.querySelectorAll('[role="tablist"]').forEach((tl) => {
+      tl.querySelectorAll('[role="tab"]').forEach((t) => {
+        t.setAttribute('aria-selected', t.classList.contains('active') ? 'true' : 'false');
+        t.tabIndex = t.classList.contains('active') ? 0 : -1;
+      });
+    });
+  }
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    let pending = null;
+    const schedule = () => { if (pending) return; pending = setTimeout(() => { pending = null; enhance(document); }, 60); };
+    document.addEventListener('DOMContentLoaded', () => {
+      enhance(document);
+      if (typeof MutationObserver !== 'undefined') new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    });
+    document.addEventListener('keydown', (e) => {
+      const t = e.target && e.target.closest && e.target.closest('[role="tab"]');
+      if (t && ['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(e.key)) {
+        const tabs = [...t.closest('[role="tablist"]').querySelectorAll('[role="tab"]')].filter((x) => !x.hidden);
+        let i = tabs.indexOf(t);
+        i = e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : (i + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+        e.preventDefault(); tabs[i].focus(); tabs[i].click();
+        return;
+      }
+      if (e.key === 'Tab') {
+        const m = [...document.querySelectorAll('.modal-backdrop')].find((x) => !x.hidden);
+        if (!m) return;
+        const f = [...m.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')].filter((x) => x.offsetParent !== null);
+        if (!f.length) return;
+        if (!m.contains(document.activeElement)) { e.preventDefault(); f[0].focus(); return; }
+        if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+        else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+      }
+    });
+  }
+
   return {
+    enhance,
     api, token, user, setSession, clearSession,
     fmtMoney, fmtDate, fmtDateTime, esc, el, toast, friendlyMessage,
     clearFieldErrors, applyFieldErrors, handleFormError,

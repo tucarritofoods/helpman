@@ -72,8 +72,8 @@
           ${dayNames.map((name,i)=>{const r=byDay[i]||{};return `
             <div class="hm3-day">
               <label><input type="checkbox" data-av="${i}" ${r.is_available?'checked':''}> ${name}</label>
-              <input type="time" data-start="${i}" value="${r.start_time||'08:00'}">
-              <input type="time" data-end="${i}" value="${r.end_time||'17:00'}">
+              <input type="time" data-start="${i}" value="${r.start_time||'08:00'}" aria-label="${name} start time">
+              <input type="time" data-end="${i}" value="${r.end_time||'17:00'}" aria-label="${name} end time">
             </div>`}).join('')}
           </div><button class="btn btn-primary" type="submit">Save availability</button></form>
         </div>

@@ -150,6 +150,8 @@ router.get('/risks', ah(async(req,res)=>{
     }
   }catch(_){}
 
+  const TYPE = { payment: 'payment', milestone: 'milestone', dispatch: 'project', compliance: 'contractor_document' };
+  for (const r of risks) r.link = await ops.linkFor(TYPE[r.type], r.entity_id);
   res.json(risks);
 }));
 

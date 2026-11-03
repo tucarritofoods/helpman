@@ -190,6 +190,7 @@ async function controlCenter() {
      LIMIT 50`
   ).all();
 
+  for (const t of queue) t.link = await linkFor(t.entity_type, t.entity_id);
   return {
     kpis: {
       new_leads: Number(newLeads.c || 0),
@@ -207,4 +208,27 @@ async function controlCenter() {
   };
 }
 
-module.exports = { generateOperationalTasks, controlCenter, upsertSystemTask };
+// Corte 6.3: where a queue item or an exception takes the team — the project, the client
+// profile, or the pro profile. Never throws; unknown or deleted records give null.
+async function linkFor(entityType, entityId) {
+  if (!entityType || !entityId) return null;
+  try {
+    const projectOfJob = async (jobId) => {
+      const j = await db.prepare('SELECT customer_id FROM job_requests WHERE id = ?').get(jobId);
+      if (!j) return null;
+      const p = await db.prepare('SELECT id FROM projects WHERE job_request_id = ? ORDER BY id DESC LIMIT 1').get(jobId);
+      return p ? { kind: 'project', id: p.id } : (j.customer_id ? { kind: 'client', id: j.customer_id } : null);
+    };
+    switch (entityType) {
+      case 'project': return { kind: 'project', id: Number(entityId) };
+      case 'job_request': return projectOfJob(entityId);
+      case 'quote': { const q = await db.prepare('SELECT job_request_id FROM quotes WHERE id = ?').get(entityId); return q ? projectOfJob(q.job_request_id) : null; }
+      case 'milestone': { const m = await db.prepare('SELECT project_id FROM milestones WHERE id = ?').get(entityId); return m ? { kind: 'project', id: m.project_id } : null; }
+      case 'payment': { const x = await db.prepare('SELECT project_id FROM payments WHERE id = ?').get(entityId); return x ? { kind: 'project', id: x.project_id } : null; }
+      case 'contractor_document': { const d = await db.prepare('SELECT contractor_id FROM contractor_documents WHERE id = ?').get(entityId); return d ? { kind: 'pro', id: d.contractor_id } : null; }
+      default: return null;
+    }
+  } catch (e) { return null; }
+}
+
+module.exports = { generateOperationalTasks, controlCenter, upsertSystemTask, linkFor };

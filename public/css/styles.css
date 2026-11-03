@@ -613,3 +613,28 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 .card { box-shadow: 0 4px 16px rgba(16,36,63,.06); }
 .hero h1 { letter-spacing: -.03em; }
 .section { padding: 3.5rem 0; }
+
+
+/* ---------- Corte 6.3: keyboard focus + phones ---------- */
+:where(a, button, [role="tab"], input, select, textarea, summary):focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
+.filter-grid { display: grid; gap: .6rem; align-items: end; grid-template-columns: 1fr 1fr; }
+.filter-grid > :first-child { grid-column: 1 / -1; }
+@media (min-width: 760px) {
+  .filter-grid { grid-template-columns: 2fr 1fr 1fr 1fr; }
+  .filter-grid > :first-child { grid-column: auto; }
+  .filter-grid.three { grid-template-columns: 2fr 1fr 1fr; }
+}
+/* Tables stack into one card per row on phones (labels come from data-label, set by HP.enhance). */
+@media (max-width: 640px) {
+  table.stackable thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  table.stackable, table.stackable tbody, table.stackable tr, table.stackable td { display: block; width: 100%; }
+  table.stackable tr { border: 1px solid var(--line); border-radius: .75rem; padding: .5rem .75rem; margin: 0 0 .6rem; background: #fff; }
+  table.stackable td { border: 0 !important; padding: .25rem 0 !important; text-align: left !important; display: flex; gap: .6rem; align-items: baseline; flex-wrap: wrap; }
+  table.stackable td[data-label]::before { content: attr(data-label); flex: 0 0 38%; font-size: .75rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+  table.stackable td:empty { display: none; }
+  .table-scroll { overflow-x: visible; }
+  .section-head { flex-wrap: wrap; gap: .5rem; }
+  .section-head .btn-row { flex-wrap: wrap; }
+  .modal-backdrop { padding: 0; }
+  .modal { margin: 0; border-radius: 0; max-height: 100vh; min-height: 100vh; }
+}

@@ -51,7 +51,7 @@
 
   function taskRow(t){
     return `<div class="hm4-task" data-task="${t.id}">
-      <div><div class="hm4-task-title">${HP.badge(t.priority,priKind(t.priority))} <strong>${HP.esc(t.title)}</strong></div>
+      <div><div class="hm4-task-title">${HP.badge(t.priority,priKind(t.priority))} ${linkTitle(t.link,t.title)}</div>
         <small>${HP.esc(t.detail||'')}${t.assignee_name?' · '+HP.esc(t.assignee_name):''}</small></div>
       <div class="hm4-actions">
         <button class="btn btn-outline btn-sm" data-task-status="in_progress">Start</button>
@@ -59,7 +59,17 @@
       </div></div>`;
   }
 
+  // Corte 6.3: queue items and exceptions open what they are about.
+  function linkTitle(link,title){
+    if(!link) return `<strong>${HP.esc(title)}</strong>`;
+    return `<button type="button" class="linklike" data-go-kind="${HP.esc(link.kind)}" data-go-id="${Number(link.id)}" style="background:none;border:0;padding:0;font:inherit;font-weight:700;color:var(--navy);cursor:pointer;text-align:left;text-decoration:underline;text-underline-offset:3px">${HP.esc(title)}</button>`;
+  }
+  function wireLinks(box){
+    box.querySelectorAll('[data-go-kind]').forEach(b=>b.addEventListener('click',()=>window.HMNav&&window.HMNav.open(b.dataset.goKind,Number(b.dataset.goId))));
+  }
+
   function wireTasks(box){
+    wireLinks(box);
     box.querySelectorAll('[data-task-status]').forEach(b=>b.onclick=async()=>{
       const row=b.closest('[data-task]');
       try{await HP.api('PATCH','/operations/tasks/'+row.dataset.task,{status:b.dataset.taskStatus});
@@ -121,8 +131,9 @@
       box.innerHTML=`<div class="section-head"><h2>Exceptions</h2></div><p class="small muted">Failed payments, unassigned projects, customer approvals and expiring compliance documents.</p>
         <div class="hm4-risk-grid">${rows.length?rows.map(x=>`
           <article class="card hm4-risk ${x.severity}">
-            <span class="eyebrow">${HP.esc(x.severity)}</span><h3>${HP.esc(x.title)}</h3><p>${HP.esc(x.detail||'')}</p>
-          </article>`).join(''):'<div class="card"><strong>No current exceptions.</strong><p class="muted">The risk center is clear.</p></div>'}</div>`;
+            <span class="eyebrow">${HP.esc(x.severity)}</span><h3>${linkTitle(x.link,x.title)}</h3><p>${HP.esc(x.detail||'')}</p>
+          </article>`).join(''):'<div class="card"><strong>No exceptions right now.</strong><p class="muted">Failed payments, projects without a pro, pending approvals and expiring documents show up here.</p></div>'}</div>`;
+      wireLinks(box);
     }catch(e){box.innerHTML=`<div class="banner banner-warn">${HP.esc(HP.friendlyMessage(e))}</div>`;}
   }
 

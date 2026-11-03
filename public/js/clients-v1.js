@@ -41,7 +41,7 @@
     if (!box.dataset.ready) {
       box.dataset.ready = '1';
       box.innerHTML = `
-        <form id="cl-filters" class="form-grid" style="grid-template-columns:2fr 1fr 1fr 1fr;align-items:end;gap:.6rem" role="search">
+        <form id="cl-filters" class="filter-grid" role="search">
           <div class="field" style="margin:0"><label for="cl-q" class="small">Search name, email, phone or #id</label><input id="cl-q" type="search" autocomplete="off"></div>
           <div class="field" style="margin:0"><label for="cl-tag" class="small">Tag</label><select id="cl-tag"><option value="">All tags</option></select></div>
           <div class="field" style="margin:0"><label for="cl-city" class="small">City or ZIP</label><input id="cl-city" type="text" autocomplete="off"></div>

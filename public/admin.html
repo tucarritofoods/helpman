@@ -143,7 +143,7 @@
       <div class="section"><div id="hm4-dispatch-v4"><p class="muted">Loading…</p></div></div>
       <div class="section">
         <div class="section-head"><h2>All projects</h2></div>
-        <form id="proj-filters" class="form-grid" style="grid-template-columns:2fr 1fr 1fr;gap:.6rem;align-items:end" role="search">
+        <form id="proj-filters" class="filter-grid three" role="search">
           <div class="field" style="margin:0"><label for="pf-q" class="small">Search #, client, service, city or pro</label><input type="search" id="pf-q" autocomplete="off"></div>
           <div class="field" style="margin:0"><label for="pf-stage" class="small">Stage</label><select id="pf-stage"><option value="">All stages</option><option value="open">Open (not finished)</option>
             <option value="assigned">Assigned</option><option value="scheduled">Scheduled</option><option value="in_progress">In progress</option><option value="review">In review</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select></div>
@@ -372,6 +372,27 @@
       const t = e.target.closest('.tab'); if (t && t.dataset.tab) showTab(t.dataset.tab);
     });
     window.addEventListener('hashchange', () => showTab(location.hash.slice(1), { push: false }));
+    // Corte 6.3: open a project, client or pro from anywhere (Overview queue, exceptions…).
+    window.HMNav = {
+      open(kind, id) {
+        if (kind === 'client' && window.openClientProfile) return window.openClientProfile(id);
+        if (kind === 'pro' && window.openProProfile) return window.openProProfile(id);
+        if (kind === 'project') {
+          const q = document.getElementById('pf-q'); if (q) q.value = '#' + id;
+          const st = document.getElementById('pf-stage'); if (st) st.value = '';
+          const at = document.getElementById('pf-attn'); if (at) at.checked = false;
+          if (!showTab('projects')) return;
+          if (adminProjects.length) renderAdminProjects();
+          let tries = 0;
+          const openIt = () => {   // the list may still be loading: wait for the card, then open it
+            const head = document.querySelector('#admin-projects .proj-card .proj-head button');
+            if (head) { if (head.getAttribute('aria-expanded') !== 'true') head.click(); head.focus(); return; }
+            if (++tries < 30) setTimeout(openIt, 150);
+          };
+          openIt();
+        }
+      },
+    };
 
     // ---------- agenda: week view, overlap warnings, scheduling ----------
     let agendaFrom = null;

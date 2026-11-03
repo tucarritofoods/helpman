@@ -14,12 +14,13 @@ const HPMsg = (() => {
 
   function mountMessages(container, opts) {
     const o = Object.assign({ fetchProjects: async () => [], allowKindSwitch: false }, opts || {});
+    const projId = 'msg-proj-' + uid();
     container.innerHTML = `
       <div class="msg-wrap">
         <div class="form-grid two">
           <div class="field">
-            <label for="msg-proj-${uid()}">Project</label>
-            <select id="msg-proj" class="msg-proj"><option value="">Loading projects…</option></select>
+            <label for="${projId}">Project</label>
+            <select id="${projId}" class="msg-proj"><option value="">Loading projects…</option></select>
           </div>
           <div class="field msg-kind-field" hidden>
             <label for="msg-kind">Conversation</label>

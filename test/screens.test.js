@@ -207,3 +207,39 @@ test('C6.2: the admin page ships the pro profile, searches and grouped rules', a
   assert.equal((await fetch(BASE + '/js/pros-v1.js')).status, 200);
   assert.match(html, /<h2>Business rules<\/h2>/);
 });
+
+// ---------------------------------------------------------------- Corte 6.3
+test('C6.3: Overview queue items and exceptions link to the project, client or pro they are about', async () => {
+  await makePro();
+  const ops = require('../src/services/operations');
+  const j = await db.prepare(`INSERT INTO job_requests (name, phone, email, address, service_type, description, claim_token) VALUES ('L','707-555-0470','l@x.test','5 St','painting','x','t5')`).run();
+  const p = await db.prepare(`INSERT INTO projects (job_request_id, customer_price_cents, contractor_cost_cents) VALUES (?, 50000, 30000)`).run(j.lastInsertRowid);
+  const pay = await db.prepare(`INSERT INTO payments (project_id, kind, amount_cents, status) VALUES (?, 'deposit', 15000, 'failed')`).run(p.lastInsertRowid);
+  const doc = await db.prepare(`INSERT INTO contractor_documents (contractor_id, doc_type, expires_on) VALUES (?, 'license', '2020-01-01')`).run(proId);
+  assert.deepEqual(await ops.linkFor('payment', pay.lastInsertRowid), { kind: 'project', id: p.lastInsertRowid });
+  assert.deepEqual(await ops.linkFor('job_request', j.lastInsertRowid), { kind: 'project', id: p.lastInsertRowid });
+  assert.deepEqual(await ops.linkFor('contractor_document', doc.lastInsertRowid), { kind: 'pro', id: proId });
+  assert.equal(await ops.linkFor('nothing', 1), null);
+  assert.equal(await ops.linkFor('payment', 999999), null, 'deleted records give no link');
+  const risks = (await api('GET', '/api/operations/risks', undefined, T.support)).data;
+  assert.deepEqual(risks.find((r) => r.type === 'payment' && r.entity_id === pay.lastInsertRowid).link, { kind: 'project', id: p.lastInsertRowid });
+  await api('POST', '/api/operations/generate', {}, T.owner);
+  const q = (await api('GET', '/api/operations/control-center', undefined, T.support)).data.queue;
+  assert.ok(q.some((t) => t.link && t.link.kind === 'project'), 'queue items carry a link');
+});
+
+test('C6.3: accessibility and phones — labels, keyboard tabs, focus trap, stacked tables', async () => {
+  const api_js = await (await fetch(BASE + '/js/api.js')).text();
+  assert.match(api_js, /function enhance\(root\)/);
+  assert.match(api_js, /ArrowRight/, 'arrow keys move between tabs');
+  assert.match(api_js, /\.modal-backdrop/, 'focus stays inside an open window');
+  assert.match(api_js, /dataset\.label/, 'table cells get labels for the phone layout');
+  const css = await (await fetch(BASE + '/css/styles.css')).text();
+  assert.match(css, /table\.stackable td\[data-label\]::before/);
+  assert.match(css, /:focus-visible/);
+  const msg = await (await fetch(BASE + '/js/messages.js')).text();
+  assert.ok(!/id="msg-proj"/.test(msg), 'the Messages project select has a unique id tied to its label');
+  const html = await (await fetch(BASE + '/admin.html')).text();
+  assert.match(html, /id="proj-filters" class="filter-grid three"/);
+  assert.match(html, /window\.HMNav = \{/);
+});
