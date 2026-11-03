@@ -17,7 +17,7 @@ function verify(email, token) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 function link(email) {
-  const base = process.env.PUBLIC_URL || 'http://localhost:3000';
+  const base = require('./magiclink').baseUrl();
   const e = Buffer.from(norm(email)).toString('base64url');
   return `${base}/api/unsubscribe?e=${e}&t=${sign(email)}`;
 }

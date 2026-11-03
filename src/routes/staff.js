@@ -42,7 +42,7 @@ router.post('/', ah(async (req, res) => {
     `INSERT INTO users (name, email, phone, password_hash, role, staff_role, email_verified, reset_token, reset_expires)
      VALUES (?,?,?,?,'admin',?,1,?,?)`
   ).run(b.name.trim(), email, '', hash, b.staff_role, token, expires);
-  const link = `${process.env.PUBLIC_URL || 'http://localhost:3000'}/auth.html?reset=${token}`;
+  const link = `${require('../services/magiclink').baseUrl()}/auth.html?reset=${token}`;
   await notify({
     to: email,
     subject: 'You were added to the Helpman team',

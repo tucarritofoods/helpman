@@ -288,3 +288,27 @@ test('C1: business counts are not public; email logo points to a real file', asy
   const mailer = require('../src/services/mailer');
   assert.equal(mailer.senderIsAuthenticatable(), !/gmail/i.test(mailer.FROM_EMAIL));
 });
+
+test('C1.1: every emailed link uses the public URL, never localhost', async () => {
+  const before = process.env.PUBLIC_URL;
+  delete process.env.PUBLIC_URL;
+  try {
+    const link = require('../src/services/unsubscribe').link('rosa.gr@test.local');
+    assert.match(link, /^https:\/\/helpman\.app\/api\/unsubscribe\?/);
+  } finally { if (before !== undefined) process.env.PUBLIC_URL = before; }
+  const src = ['src/routes/auth.js', 'src/routes/staff.js', 'src/routes/contractors.js', 'src/routes/collections.js', 'src/services/unsubscribe.js']
+    .map(f => fs.readFileSync(path.join(__dirname, '..', f), 'utf8')).join('\n');
+  assert.ok(!src.includes('localhost:3000'), 'no localhost fallback left in emailed links');
+});
+
+test('C1.1: the plug-in panel flags unused variables and non-production mode', async () => {
+  process.env.SESSION_SECRET = 'leftover';
+  try {
+    const r = await api('GET', '/api/admin/plugs', undefined, admin);
+    const left = r.data.items.find(i => i.id === 'leftovers');
+    assert.ok(left && left.status === 'warning' && /SESSION_SECRET/.test(left.detail));
+    assert.ok(!JSON.stringify(r.data).includes('"leftover"'), 'the value itself is never shown');
+    assert.equal(r.data.items.find(i => i.id === 'production').status, 'warning');
+  } finally { delete process.env.SESSION_SECRET; }
+});
+

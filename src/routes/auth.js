@@ -19,7 +19,7 @@ function publicUser(u) {
 }
 
 async function sendVerificationEmail(user, token) {
-  const link = `${process.env.PUBLIC_URL || 'http://localhost:3000'}/api/auth/verify?token=${token}`;
+  const link = `${require('../services/magiclink').baseUrl()}/api/auth/verify?token=${token}`;
   return await notify({
     to: user.email,
     subject: 'Verify your Helpman email',
@@ -263,7 +263,7 @@ router.post('/forgot', ah(async (req, res) => {
   const token = newToken();
   const expires = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
   await db.prepare('UPDATE users SET reset_token = ?, reset_expires = ? WHERE id = ?').run(token, expires, user.id);
-  const link = `${process.env.PUBLIC_URL || 'http://localhost:3000'}/auth.html?reset=${token}`;
+  const link = `${require('../services/magiclink').baseUrl()}/auth.html?reset=${token}`;
   await notify({
     to: user.email,
     subject: 'Reset your Helpman password',

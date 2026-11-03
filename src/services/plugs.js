@@ -16,6 +16,7 @@ const storage = require('./storage');
 const present = (k) => !!(process.env[k] && String(process.env[k]).trim());
 const envList = (keys) => keys.map(k => ({ name: k, set: present(k) }));
 const isProd = () => process.env.NODE_ENV === 'production';
+const diskDbPath = () => /^\/var\/data\//.test(String(process.env.DB_PATH || ''));
 
 function stripeMode() {
   const sk = String(process.env.STRIPE_SECRET_KEY || '');
@@ -53,7 +54,7 @@ async function report() {
     let dbOk = false;
     try { dbOk = !!(await db.prepare('SELECT 1 AS ok').get()); } catch (e) { dbOk = false; }
     const pg = present('DATABASE_URL');
-    const diskDb = !pg && /^\/var\/data\//.test(String(process.env.DB_PATH || ''));
+    const diskDb = !pg && diskDbPath();
     let status = !dbOk ? 'missing' : (pg || diskDb) ? 'ok' : 'missing';
     let detail = !dbOk ? 'The database does not answer.'
       : pg ? 'PostgreSQL (persistent, with the backups of your plan).'
@@ -110,7 +111,20 @@ async function report() {
         : 'Every owner account uses two-step verification.',
       ['ADMIN_EMAIL', 'ADMIN_PASSWORD']));
     items.push(item('E5', 'production', 'Production mode', isProd() ? 'ok' : 'warning',
-      isProd() ? 'NODE_ENV=production: fail-fast checks are on.' : 'NODE_ENV is not "production": safety checks are relaxed.', ['NODE_ENV']));
+      isProd() ? 'NODE_ENV=production: fail-fast checks and required two-step verification are on.'
+        : 'NODE_ENV is not "production": two-step verification is not enforced and, without Stripe, an accepted quote records the deposit with no money collected. Set NODE_ENV=production together with the Stripe keys (E1).',
+      ['NODE_ENV']));
+    // Variables that no code reads: clutter, and secrets nobody rotates.
+    const UNUSED = ['VITE_API_URL', 'REFRESH_TOKEN_SECRET', 'SESSION_SECRET'];
+    const leftovers = UNUSED.filter(present);
+    if (leftovers.length) {
+      items.push(item('E5', 'leftovers', 'Unused variables', 'warning',
+        `Helpman does not read ${leftovers.join(', ')}. Delete them from Render.`, leftovers));
+    }
+    if (present('ADMIN_PASSWORD') && (present('DATABASE_URL') || diskDbPath())) {
+      items.push(item('E5', 'admin_password', 'First-boot password still set', 'warning',
+        'ADMIN_PASSWORD is only used to create the first admin on an empty database. With persistent data, delete it from Render.', ['ADMIN_PASSWORD']));
+    }
   }
 
   // ---- E6 Optional ----

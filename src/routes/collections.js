@@ -81,7 +81,7 @@ async function sendReminder(item, byUserId) {
   const isDeposit = item.status === 'deposit_unpaid';
   const amount = item.can_remind.amount_cents;
   const first = String(item.customer_name || '').split(' ')[0] || 'there';
-  const portal = `${process.env.PUBLIC_URL || 'http://localhost:3000'}/customer.html`;
+  const portal = `${require('../services/magiclink').baseUrl()}/customer.html`;
   const lead = isDeposit
     ? `Hi ${first}, your ${item.service_type} project is booked, but we have not received the deposit yet. You can complete it securely from your portal:`
     : `Hi ${first}, your ${item.service_type} project was signed off and the remaining balance is ready to pay. You can pay securely from your portal:`;
