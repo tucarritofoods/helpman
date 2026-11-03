@@ -150,6 +150,8 @@ app.use('/api/auth', authLimiter);
 app.post('/api/jobs', intakeLimiter);
 app.post('/api/referrals/redeem', intakeLimiter); // public + guessable codes: cap attempts per IP
 app.use('/api/intelligence', intelligenceLimiter);
+// Link-based visit confirmation (public): cap attempts per IP like the other public forms.
+app.use('/api/visit', intakeLimiter);
 
 // ---- Photo delivery ----
 // Multer stores files under random names with no extension, so we resolve the
@@ -274,6 +276,7 @@ app.use('/api/disputes', require('./src/routes/disputes'));
 app.use('/api/staff', require('./src/routes/staff'));
 app.use('/api/admin/plugs', require('./src/routes/plugs'));
 app.use('/api/admin/settings', require('./src/routes/settings'));
+app.use('/api/visit', require('./src/routes/visit'));
 app.use('/api/me', require('./src/routes/privacy'));
 app.use('/api', require('./src/routes/offers'));
 app.use('/api/email', require('./src/routes/emailEvents'));
@@ -299,6 +302,12 @@ setInterval(() => {
   runFollowupAutomation()
     .then(r => { if (r.created || r.emailed) console.log('[followup]', JSON.stringify(r)); })
     .catch(e => console.error('[followup]', e.message));
+}, 60 * 60 * 1000).unref();
+// ---- Background: visit lifecycle emails (confirm reminder 24 h, escalation 72 h, review reminder 3 days) ----
+setInterval(() => {
+  require('./src/services/visit').runLifecycleEmails()
+    .then(r => { if (r.confirm_reminders || r.escalations || r.review_reminders) console.log('[lifecycle]', JSON.stringify(r)); })
+    .catch(e => console.error('[lifecycle]', e.message));
 }, 60 * 60 * 1000).unref();
 // ---- Background: automatic pro payouts (Stripe Connect) once the hold period passes ----
 setInterval(() => {

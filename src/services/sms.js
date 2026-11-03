@@ -128,6 +128,29 @@ const T = {
   onTheWay: (first, service) => `${BRAND()}: ${first} is on the way for your ${service} visit.${STOP_LINE}`,
 };
 
+// ---------- the day-before reminder by EMAIL (same claim as the text) ----------
+async function emailReminder(projectId) {
+  try {
+    const visit = require('./visit');
+    const pt = await visit.parties(projectId);
+    if (!pt.customer || !pt.customer.email) return false;
+    const { notify, dayBeforeReminderCustomer, contractorPhotoUrl } = require('./notify');
+    const { displayName, firstName } = require('./views');
+    await notify({
+      to: pt.customer.email,
+      subject: `Reminder: your visit is tomorrow — project #${projectId}`,
+      html: dayBeforeReminderCustomer({
+        customerName: firstName(pt.customer.name) || 'there',
+        techName: pt.pro ? displayName(pt.pro.name) : null,
+        photoUrl: pt.pro ? contractorPhotoUrl(pt.pro) : null,
+        projectId, serviceType: pt.job.service_type,
+        day: String(pt.project.scheduled_start || '').slice(0, 10), window: pt.project.arrival_window || '',
+      }),
+    });
+    return true;
+  } catch (e) { return false; }
+}
+
 // ---------- the day-before reminder job ----------
 async function runReminders({ now = new Date(), force = false } = {}) {
   const tz = TZ();
@@ -138,16 +161,18 @@ async function runReminders({ now = new Date(), force = false } = {}) {
      JOIN job_requests j ON j.id = p.job_request_id
      WHERE p.stage IN ('assigned','scheduled') AND p.reminder_sent_at IS NULL AND p.scheduled_start IS NOT NULL`
   ).all()).filter(r => String(r.scheduled_start).slice(0, 10) === tomorrow);
-  let sent = 0;
+  let sent = 0, emailed = 0;
   for (const r of rows) {
     // Atomic claim: two instances (or two clicks) cannot remind the same visit twice.
     const claim = await db.prepare('UPDATE projects SET reminder_sent_at = CURRENT_TIMESTAMP WHERE id = ? AND reminder_sent_at IS NULL').run(r.id);
     if (claim.changes !== 1) continue;
     const out = await textCustomer(r.id, 'reminder', T.reminder(r.service_type, r.scheduled_start));
     if (out.sent) sent++;
-    else if (out.reason === 'failed') await db.prepare('UPDATE projects SET reminder_sent_at = NULL WHERE id = ?').run(r.id); // retry next run
+    else if (out.reason === 'failed') { await db.prepare('UPDATE projects SET reminder_sent_at = NULL WHERE id = ?').run(r.id); continue; } // retry next run
+    // Every customer also gets the reminder by email (SMS needs consent; email does not).
+    if (await emailReminder(r.id)) emailed++;
   }
-  return { sent, checked: rows.length, for_date: tomorrow };
+  return { sent, emailed, checked: rows.length, for_date: tomorrow };
 }
 
 module.exports = {

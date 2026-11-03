@@ -217,6 +217,7 @@ async function chargeBalance(projectId, { actorId = null, trigger = 'signoff' } 
 async function onBalancePaid(projectId) {
   if (await balanceCents(projectId) < 100) {
     await db.prepare(`UPDATE projects SET balance_charge_status = 'paid', balance_charge_error = NULL WHERE id = ?`).run(projectId);
+    await require('./visit').sendReceipt(projectId).catch(() => {});
   }
   // Payable due date counts from FULL payment (the hold protects the customer).
   const holdDays = await settings.get('payout_hold_days');

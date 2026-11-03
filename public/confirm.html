@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Confirm your finished job — Helpman</title>
+<link rel="icon" href="favicon.svg">
+<link rel="stylesheet" href="css/styles.css">
+<style>
+  body { background: #f6f8fb; }
+  .wrap { max-width: 560px; margin: 0 auto; padding: 20px 16px 48px; }
+  .logo { display: block; max-width: 220px; margin: 8px auto 18px; }
+  .card { background: #fff; border-radius: 16px; box-shadow: 0 2px 12px rgba(16,36,63,.08); padding: 22px 20px; }
+  h1 { font-size: 1.35rem; color: #143d7a; margin: 0 0 .4rem; }
+  .photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin: 14px 0; }
+  .photos img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 10px; border: 1px solid #e2e8f0; }
+  .choice { display: grid; gap: 10px; margin-top: 14px; }
+  .choice .btn { width: 100%; min-height: 48px; font-size: 1rem; }
+  canvas { width: 100%; height: 160px; border: 1px solid #cbd5e1; border-radius: 10px; touch-action: none; background: #fff; }
+  .check { display: flex; gap: .55rem; align-items: flex-start; margin: .55rem 0; font-size: .95rem; }
+  .check input { margin-top: .25rem; width: 20px; height: 20px; }
+  .field input, .field textarea, .field select { width: 100%; font-size: 1rem; min-height: 44px; }
+  .muted { color: #64748b; }
+  .err { color: #b42318; }
+</style>
+</head>
+<body>
+  <main class="wrap">
+    <img class="logo" src="img/helpman-logo-primary.png" alt="Helpman by Mendoza Capital LLC">
+    <div class="card" id="box" aria-live="polite"><p class="muted">Loading your project…</p></div>
+    <p class="small muted" style="text-align:center;margin-top:16px">Helpman by Mendoza Capital LLC · <a href="terms.html">Terms</a> · <a href="privacy.html">Privacy</a></p>
+  </main>
+<script>
+(function () {
+  'use strict';
+  const qs = new URLSearchParams(location.search);
+  const token = qs.get('t') || '';
+  const box = document.getElementById('box');
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const money = (c) => '$' + (Number(c || 0) / 100).toFixed(2);
+  const REASONS = { quality: 'Quality of the work', incomplete: 'Work is incomplete', no_show: 'The pro did not show up', damage: 'Damage to my property', billing: 'Billing / price', other: 'Something else' };
+  let data = null;
+
+  async function call(method, path, body) {
+    const r = await fetch('/api/visit/' + encodeURIComponent(token) + path, {
+      method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined,
+    });
+    let j = {}; try { j = await r.json(); } catch (e) { /* empty */ }
+    if (!r.ok) {
+      const first = j.errors ? Object.values(j.errors)[0] : null;
+      throw new Error(j.error || first || 'Something went wrong. Please try again.');
+    }
+    return j;
+  }
+
+  function done(title, text) {
+    box.innerHTML = `<h1>${esc(title)}</h1><p>${esc(text)}</p><p><a class="btn btn-outline" href="customer.html">Open my Helpman portal</a></p>`;
+  }
+
+  function home() {
+    const d = data;
+    if (d.status === 'confirmed') return done('Already confirmed — thank you!', 'This project is signed off. You can see the receipt and leave a review in your portal.');
+    if (d.status === 'problem_reported') return done('We are on it', 'You reported a problem on this project. Helpman support will contact you from your portal; nothing more is charged while we solve it.');
+    if (d.status === 'cancelled') return done('This project was cancelled', 'There is nothing to confirm.');
+    if (d.status === 'not_ready') return done('Not ready yet', 'Your pro has not finished the job yet. We will email you when they do.');
+    const photos = d.photos.length ? `<div class="photos">${d.photos.map((u) => `<img src="${esc(u)}" alt="Finished work" loading="lazy">`).join('')}</div>` : '';
+    const pay = d.balance_cents > 0
+      ? `<p class="small muted">${d.auto_charge ? `When you confirm, the remaining <strong>${money(d.balance_cents)}</strong> is charged to the card you saved with your deposit.` : `After you confirm, you can pay the remaining <strong>${money(d.balance_cents)}</strong> from your portal.`}</p>` : '';
+    box.innerHTML = `<h1>Hi ${esc(d.customer_first_name || 'there')}, your job is finished</h1>
+      <p>${esc(d.tech_name || 'Your pro')} finished your <strong>${esc(d.service_type)}</strong> job (project #${esc(d.project_id)}). Did everything go well?</p>
+      ${photos}${pay}
+      <div class="choice">
+        <button class="btn btn-ok" type="button" id="go-ok">Everything is fine — confirm &amp; sign</button>
+        <button class="btn btn-outline" type="button" id="go-problem">Report a problem</button>
+      </div>`;
+    document.getElementById('go-ok').addEventListener('click', confirmForm);
+    document.getElementById('go-problem').addEventListener('click', problemForm);
+  }
+
+  function confirmForm() {
+    box.innerHTML = `<h1>Confirm and sign</h1>
+      <form id="f" novalidate>
+        <label class="check"><input type="checkbox" id="c-work"> <span>The work is complete and I accept it.</span></label>
+        <label class="check"><input type="checkbox" id="c-clean"> <span>The work area was left clean.</span></label>
+        ${data.auto_charge && data.balance_cents > 0 ? `<p class="small muted">With your deposit you authorized: “${esc(data.card_consent_text)}”</p>` : ''}
+        <div class="field"><label for="c-name">Your full name</label><input id="c-name" autocomplete="name" maxlength="120"></div>
+        <div class="field"><label>Draw your signature (finger or mouse)</label><canvas id="sig" width="500" height="160" aria-label="Signature pad"></canvas>
+          <button class="btn btn-outline btn-sm" type="button" id="sig-clear" style="margin-top:.4rem">Clear signature</button></div>
+        <div class="field"><label for="c-notes">Anything to add? (optional)</label><textarea id="c-notes" rows="2" maxlength="1000"></textarea></div>
+        <p class="small err" id="e" role="alert" hidden></p>
+        <div class="choice"><button class="btn btn-ok" type="submit" id="submit">Confirm and sign</button>
+        <button class="btn btn-outline" type="button" id="back">Back</button></div>
+      </form>`;
+    const cv = document.getElementById('sig'), ctx = cv.getContext('2d');
+    let drawing = false, strokes = 0;
+    ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.strokeStyle = '#0f172a';
+    const pos = (e) => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * cv.width / r.width, (e.clientY - r.top) * cv.height / r.height]; };
+    cv.addEventListener('pointerdown', (e) => { drawing = true; strokes++; cv.setPointerCapture(e.pointerId); const [x, y] = pos(e); ctx.beginPath(); ctx.moveTo(x, y); });
+    cv.addEventListener('pointermove', (e) => { if (!drawing) return; const [x, y] = pos(e); ctx.lineTo(x, y); ctx.stroke(); });
+    cv.addEventListener('pointerup', () => { drawing = false; });
+    document.getElementById('sig-clear').addEventListener('click', () => { ctx.clearRect(0, 0, cv.width, cv.height); strokes = 0; });
+    document.getElementById('back').addEventListener('click', home);
+    document.getElementById('f').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const err = document.getElementById('e');
+      err.hidden = true;
+      if (!strokes) { err.textContent = 'Please draw your signature.'; err.hidden = false; return; }
+      const btn = document.getElementById('submit');
+      btn.disabled = true; btn.textContent = 'Confirming…';
+      try {
+        const r = await call('POST', '/confirm', {
+          signer_name: document.getElementById('c-name').value,
+          signature: cv.toDataURL('image/png'),
+          checklist: { work_complete: document.getElementById('c-work').checked, site_clean: document.getElementById('c-clean').checked },
+          notes: document.getElementById('c-notes').value || undefined,
+        });
+        const bc = r.balance_charge || {};
+        const MSG = { paid: 'The remaining balance was charged to your saved card. A receipt is on its way to your email.',
+          requires_action: 'Your bank asks you to confirm the balance payment: we emailed you a link to pay it.',
+          failed: 'We could not charge your saved card: we emailed you a link to pay the balance.',
+          needs_payment: 'You can pay the remaining balance from your portal.' };
+        done('Thank you — project confirmed!', MSG[bc.status] || 'Your project is complete. You can see everything in your portal.');
+      } catch (ex) { err.textContent = ex.message; err.hidden = false; btn.disabled = false; btn.textContent = 'Confirm and sign'; }
+    });
+  }
+
+  function problemForm() {
+    box.innerHTML = `<h1>Report a problem</h1>
+      <p class="small muted">Helpman support reviews it and contacts you from your portal. Payments stay on hold until it is solved.</p>
+      <form id="f" novalidate>
+        <div class="field"><label for="p-reason">What happened?</label><select id="p-reason">${(data.reasons || Object.keys(REASONS)).map((k) => `<option value="${esc(k)}">${esc(REASONS[k] || k)}</option>`).join('')}</select></div>
+        <div class="field"><label for="p-desc">Tell us more</label><textarea id="p-desc" rows="4" maxlength="2000" placeholder="What is wrong, and where?"></textarea></div>
+        <p class="small err" id="e" role="alert" hidden></p>
+        <div class="choice"><button class="btn btn-danger" type="submit" id="submit">Send report</button>
+        <button class="btn btn-outline" type="button" id="back">Back</button></div>
+      </form>`;
+    document.getElementById('back').addEventListener('click', home);
+    document.getElementById('f').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const err = document.getElementById('e'); err.hidden = true;
+      const btn = document.getElementById('submit'); btn.disabled = true; btn.textContent = 'Sending…';
+      try {
+        await call('POST', '/problem', { reason: document.getElementById('p-reason').value, description: document.getElementById('p-desc').value });
+        done('Thanks — we received your report', 'Helpman support will contact you from your portal. Nothing more is charged while we solve it.');
+      } catch (ex) { err.textContent = ex.message; err.hidden = false; btn.disabled = false; btn.textContent = 'Send report'; }
+    });
+  }
+
+  (async () => {
+    if (!token) return done('Link incomplete', 'Open the link from your email again, or open your project from your Helpman portal.');
+    try {
+      data = await call('GET', '');
+      if (qs.get('problem') === '1' && data.status === 'awaiting_confirmation') problemForm(); else home();
+    } catch (e) { done('This link does not work', e.message); }
+  })();
+})();
+</script>
+</body>
+</html>

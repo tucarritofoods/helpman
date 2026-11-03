@@ -817,6 +817,13 @@ db.exec(`CREATE TABLE IF NOT EXISTS chargebacks (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`);
 
+// ---- Corte 3: the visit (arrival, finished work, confirmation) and lifecycle emails ----
+// Mirrored for PostgreSQL in src/db/migrations/014_visit.sql.
+for (const [col, type] of [['arrived_at', 'TEXT'], ['departed_at', 'TEXT'], ['on_my_way_at', 'TEXT'],
+  ['confirm_reminder_sent_at', 'TEXT'], ['confirm_escalated_at', 'TEXT'], ['review_reminder_sent_at', 'TEXT'], ['receipt_sent_at', 'TEXT']]) {
+  if (!columnExists('projects', col)) db.exec(`ALTER TABLE projects ADD COLUMN ${col} ${type}`);
+}
+
 // ---- Migrate payments.provider CHECK to include 'stripe' (was manual/stripe_stub) ----
 // Also adds 'paid' to the status CHECK for Stripe-confirmed payments.
 // 2026-10-07: also adds 'simulated' provider for the test payment mode.

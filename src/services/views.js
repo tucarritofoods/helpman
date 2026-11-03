@@ -74,6 +74,7 @@ const PROJECT_FIELDS_FOR_CONTRACTOR = [
   'id', 'job_request_id', 'contractor_id', 'contractor_status', 'stage',
   'scheduled_start', 'scheduled_end', 'arrival_window', 'schedule_status', 'offer_expires_at',
   'contractor_cost_cents', 'created_at', 'updated_at', 'completion_signed_at',
+  'arrived_at', 'departed_at', 'on_my_way_at',
 ];
 const MILESTONE_FIELDS = ['id', 'project_id', 'title', 'sort_order', 'status', 'customer_approval', 'approved_at', 'created_at'];
 const PHOTO_FIELDS = ['id', 'filename', 'original_name', 'mime', 'kind', 'created_at'];

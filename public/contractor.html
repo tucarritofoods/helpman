@@ -461,21 +461,27 @@
         ${j.description ? `<h4>What the customer asked for</h4><p class="small" style="white-space:pre-line">${HP.esc(j.description)}</p>` : ''}
         <div class="banner banner-info" style="margin:.75rem 0"><strong>Helpman rule:</strong> all contact with the customer goes through Helpman support (Messages below). Never share or ask for phone numbers, emails or social accounts — that is grounds for removal from the platform.</div>
         ${(!offered && ['scheduled', 'in_progress'].includes(p.stage)) ? `<h4>Visit day</h4>
+        <ol class="small" style="margin:.2rem 0 .5rem 1.1rem;padding:0">
+          <li>${p.on_my_way_at ? '✓ ' : ''}Tap <strong>On my way</strong> when you leave.</li>
+          <li>${p.arrived_at ? '✓ ' : ''}Tap <strong>I've arrived</strong> at the door — the customer gets your photo so they know it is you.</li>
+          <li>When you finish, upload at least one photo of the <strong>finished work</strong> (below) and tap <strong>Work finished</strong>. The customer confirms and signs from their phone.</li>
+        </ol>
         <div class="btn-row" style="margin-top:.4rem">
-          <button class="btn btn-primary btn-sm" data-otw="${p.id}" type="button">🚗 I'm on my way</button>
-          <button class="btn btn-outline btn-sm" data-outcome="completed" data-pid="${p.id}" type="button">Visit done</button>
+          ${p.arrived_at ? '' : `<button class="btn btn-outline btn-sm" data-otw="${p.id}" type="button">🚗 On my way</button>
+          <button class="btn btn-primary btn-sm" data-checkin="${p.id}" type="button">📍 I've arrived</button>`}
+          ${p.arrived_at || p.stage === 'in_progress' ? `<button class="btn btn-ok btn-sm" data-checkout="${p.id}" type="button">✅ Work finished</button>` : ''}
           <button class="btn btn-outline btn-sm" data-outcome="customer_no_show" data-pid="${p.id}" type="button">Customer wasn't there</button>
         </div>
-        <p class="small muted">"On my way" notifies the customer from the Helpman number (only if they opted in). They never see your phone number.</p>` : ''}
+        <p class="small muted">The customer is notified from Helpman by email (and by text if they opted in). They never see your phone number or email.</p>` : ''}
+        ${p.stage === 'review' ? `<div class="banner banner-info" style="margin:.75rem 0"><strong>Work finished.</strong> Waiting for the customer to confirm. Your payout is created when they do.</div>` : ''}
         <h4>Move this job</h4>
         <div class="btn-row" style="margin-top:.4rem">${stageBtns || '<span class="small muted">No further moves available for your role.</span>'}</div>
         <hr class="divider">
         <h4>Milestones</h4>
         <div class="ms">${ms || '<p class="small muted">No milestones yet.</p>'}</div>
         <div class="banner banner-info" style="margin:.75rem 0">
-          <strong>Close-out:</strong> print the <a href="signoff.html?project=${p.id}" target="_blank" rel="noopener"><strong>close-out sheet</strong></a>,
-          have the customer sign it, then upload photos of the <strong>finished work</strong> plus the <strong>signed sheet</strong> below.
-          A milestone cannot be marked done without both.
+          <strong>Close-out:</strong> upload photos of the <strong>finished work</strong> below, then tap <strong>Work finished</strong>.
+          The customer signs digitally from the email Helpman sends them — no paper needed.
         </div>
         <hr class="divider">
         <h4>Job photos</h4>
@@ -483,7 +489,7 @@
         <form class="photo-upload" style="margin-top:.75rem" novalidate>
           <div class="form-grid two">
             <div class="field"><label for="ph-kind-${p.id}">Kind of photos</label>
-              <select id="ph-kind-${p.id}" name="kind"><option value="progress">Progress</option><option value="completion">Completion (finished work)</option><option value="signoff">Signed close-out sheet</option></select></div>
+              <select id="ph-kind-${p.id}" name="kind"><option value="completion">Finished work (sent to the customer)</option><option value="progress">Progress</option></select></div>
             <div class="field"><label for="ph-file-${p.id}">Add photos</label>
               <input type="file" id="ph-file-${p.id}" name="photos" accept="image/*" multiple>
               <div class="hint">Images only, up to 6, 5 MB each.</div></div>
@@ -494,9 +500,21 @@
         HP.busy(b, true, 'Sending…');
         try {
           const r = await HP.api('POST', `/projects/${b.dataset.otw}/on-my-way`, {});
-          HP.toast(r.sent ? 'The customer was told you are on the way.' : (r.reason === 'no_consent' ? 'Customer has not opted in to texts; nothing was sent.' : 'Could not send the text.'), r.sent ? 'ok' : 'info');
+          HP.toast(r.sent || r.emailed ? 'The customer was told you are on the way.' : 'The customer was already told a moment ago.', r.sent || r.emailed ? 'ok' : 'info');
+          refreshJob(b.dataset.otw, body);
         } catch (e) { HP.toast(HP.friendlyMessage(e), 'error'); }
         finally { HP.busy(b, false); }
+      }));
+      body.querySelectorAll('[data-checkin]').forEach((b) => b.addEventListener('click', async () => {
+        HP.busy(b, true, 'Checking in…');
+        try { await HP.api('POST', `/projects/${b.dataset.checkin}/check-in`, {}); HP.toast('Checked in — the customer was told you arrived.', 'ok'); refreshJob(b.dataset.checkin, body); }
+        catch (e) { HP.toast(HP.friendlyMessage(e), 'error'); HP.busy(b, false); }
+      }));
+      body.querySelectorAll('[data-checkout]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm('Finish this job? We will send the customer your photos and ask them to confirm.')) return;
+        HP.busy(b, true, 'Finishing…');
+        try { await HP.api('POST', `/projects/${b.dataset.checkout}/check-out`, {}); HP.toast('Job finished — the customer was asked to confirm.', 'ok'); refreshJob(b.dataset.checkout, body); }
+        catch (e) { HP.toast(HP.friendlyMessage(e), 'error'); HP.busy(b, false); }
       }));
       body.querySelectorAll('[data-outcome]').forEach((b) => b.addEventListener('click', async () => {
         if (b.dataset.outcome === 'customer_no_show' && !confirm('Record that the customer was not there? We will text them to reschedule.')) return;

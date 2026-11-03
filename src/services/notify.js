@@ -31,17 +31,14 @@ function esc(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// Plain status notification. Since Corte 3 it renders inside the branded layout
+// (same look and legal footer as every other Helpman email). All values escaped.
 function shell(title, intro, rows) {
   const rowHtml = (rows || []).map(([k, v]) =>
-    `<tr><td style="color:#64748b;padding:6px 12px 6px 0;">${esc(k)}</td><td style="padding:6px 0;"><strong>${esc(v)}</strong></td></tr>`
+    `<tr><td style="color:#8a97a5;font-size:13px;padding:7px 14px 7px 0;vertical-align:top;white-space:nowrap;">${esc(k)}</td><td style="font-size:14px;padding:7px 0;vertical-align:top;color:#1d2a3a;"><strong>${esc(v)}</strong></td></tr>`
   ).join('');
-  return `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#15202b;max-width:560px;margin:0 auto;padding:24px;">
-    <div style="font-weight:900;font-size:20px;margin-bottom:4px;">🛠 ${esc(BRAND)}</div>
-    <h2 style="margin:8px 0 4px;">${esc(title)}</h2>
-    <p style="color:#475569;">${esc(intro)}</p>
-    ${rowHtml ? `<table>${rowHtml}</table>` : ''}
-    <p style="color:#94a3b8;font-size:12px;margin-top:24px;">This is an automated notification from Helpman by Mendoza Capital LLC. Please do not reply directly — message us from your portal instead.</p>
-  </body></html>`;
+  return brandShell(esc(title), `<p style="margin:0;">${esc(intro)}</p>`,
+    rowHtml ? `<table style="margin:16px 0;border-collapse:collapse;" cellpadding="0" cellspacing="0"><tbody>${rowHtml}</tbody></table>` : '');
 }
 
 // Look up the people involved in a project for notifications.
@@ -72,6 +69,11 @@ function contractorPhotoUrl(c) {
 
 const { baseUrl } = require('./magiclink');
 
+function legalLine() {
+  const addr = process.env.COMPANY_POSTAL_ADDRESS ? ` &middot; ${esc(process.env.COMPANY_POSTAL_ADDRESS)}` : '';
+  return `Helpman by Mendoza Capital LLC${addr} &middot; <a href="${baseUrl()}/terms.html" style="color:#8a97a5;">Terms</a> &middot; <a href="${baseUrl()}/privacy.html" style="color:#8a97a5;">Privacy</a>`;
+}
+
 function logoUrl() { return `${baseUrl()}/img/helpman-logo-primary.png`; }
 
 function brandShell(title, intro, bodyHtml) {
@@ -87,7 +89,9 @@ function brandShell(title, intro, bodyHtml) {
         ${bodyHtml || ''}
       </div>
       <div style="background:#f6f8fb;border-top:1px solid #e2e8f0;padding:16px 36px;">
-        <p style="color:#8a97a5;font-size:12px;line-height:1.6;margin:0;">This is an automated notification from Helpman by Mendoza Capital LLC. Please do not reply directly &mdash; message us from your portal instead.</p>
+        <p style="color:#8a97a5;font-size:12px;line-height:1.6;margin:0 0 6px;">This is an automated notification from Helpman by Mendoza Capital LLC. Please do not reply to this email &mdash; message us from your portal instead.</p>
+        <p style="color:#8a97a5;font-size:12px;line-height:1.6;margin:0 0 6px;">For everyone&apos;s safety, all contact between customers and pros goes through Helpman support. Never share phone numbers, emails or payment details outside the platform.</p>
+        <p style="color:#8a97a5;font-size:12px;line-height:1.6;margin:0;">${legalLine()}</p>
       </div>
     </div>
     <p style="text-align:center;color:#8a97a5;font-size:12px;margin:18px 0 0;letter-spacing:.02em;">Home projects, handled.</p>
@@ -208,11 +212,76 @@ function scheduleConfirmedCustomer({ customerName, techName, photoUrl, projectId
     + btn(`${baseUrl()}/customer.html`, 'View my project'));
 }
 
+// ---------- Corte 3: the visit and its closing emails ----------
+const money = (c) => '$' + (Number(c || 0) / 100).toFixed(2);
+
+function twoButtons(okUrl, okLabel, noUrl, noLabel) {
+  return `<p style="text-align:center;margin:24px 0 8px;">
+      <a href="${esc(okUrl)}" style="background:#1f8a4c;color:#ffffff;padding:13px 30px;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;display:inline-block;margin:0 6px 8px 0;box-shadow:0 2px 6px rgba(31,138,76,.35);">${esc(okLabel)}</a>
+      <a href="${esc(noUrl)}" style="background:#ffffff;color:#b42318;padding:11px 26px;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;display:inline-block;border:2px solid #f3c1c1;">${esc(noLabel)}</a>
+    </p>`;
+}
+function photoStrip(urls) {
+  const list = (urls || []).slice(0, 4);
+  if (!list.length) return '';
+  return `<div style="margin:16px 0;text-align:center;">${list.map(u =>
+    `<img src="${esc(u)}" alt="Finished work" width="130" height="130" style="width:130px;height:130px;object-fit:cover;border-radius:10px;margin:4px;border:1px solid #e2e8f0;">`).join('')}</div>`;
+}
+
+function dayBeforeReminderCustomer({ customerName, techName, photoUrl, projectId, serviceType, day, window }) {
+  return brandShell(`See you tomorrow &mdash; project #${esc(String(projectId))}`,
+    `<p style="margin:0;">Hi <strong>${esc(customerName)}</strong>, a reminder that your <strong>${esc(serviceType)}</strong> visit is <strong>tomorrow, ${esc(prettyDay(day))}</strong>${window ? `, arrival window <strong>${esc(window)}</strong>` : ''}.</p>`,
+    `${techPhoto(photoUrl, 110)}${techName ? `<p style="text-align:center;margin:6px 0 0;color:#143d7a;"><strong>${esc(techName)}</strong></p>` : ''}`
+    + flexBox()
+    + `<p style="color:#5b6b7e;font-size:14px;line-height:1.65;">Need to change something? Message us from your portal &mdash; please do it before the visit.</p>`
+    + btn(`${baseUrl()}/customer.html`, 'Open my project'));
+}
+
+function onTheWayCustomer({ customerName, techName, photoUrl, projectId, serviceType }) {
+  return brandShell(`Your pro is on the way &mdash; project #${esc(String(projectId))}`,
+    `<p style="margin:0;">Hi <strong>${esc(customerName)}</strong>, <strong>${esc(techName)}</strong> is on the way for your <strong>${esc(serviceType)}</strong> visit.</p>`,
+    `${techPhoto(photoUrl, 110)}<p style="color:#5b6b7e;font-size:14px;line-height:1.65;">Please make sure someone 18+ is home and the work area is accessible.</p>`);
+}
+
+function arrivedCustomer({ customerName, techName, photoUrl, projectId, serviceType }) {
+  return brandShell(`Your pro has arrived &mdash; project #${esc(String(projectId))}`,
+    `<p style="margin:0;">Hi <strong>${esc(customerName)}</strong>, <strong>${esc(techName)}</strong> checked in at your home and is starting your <strong>${esc(serviceType)}</strong> job.</p>`,
+    `${techPhoto(photoUrl, 110)}<p style="color:#5b6b7e;font-size:14px;line-height:1.65;">Is this not the person in the photo? Do not let them in and message Helpman support right away from your portal.</p>`);
+}
+
+function workFinishedCustomer({ customerName, techName, projectId, serviceType, photoUrls, balanceCents, autoCharge, confirmUrl, problemUrl, reminder }) {
+  const pay = balanceCents > 0
+    ? (autoCharge
+      ? `<p style="color:#5b6b7e;font-size:14px;line-height:1.65;">When you confirm, the remaining balance of <strong>${esc(money(balanceCents))}</strong> is charged to the card you saved with your deposit. No second checkout.</p>`
+      : `<p style="color:#5b6b7e;font-size:14px;line-height:1.65;">After you confirm, you can pay the remaining balance of <strong>${esc(money(balanceCents))}</strong> from your portal.</p>`)
+    : '';
+  return brandShell(`${reminder ? 'Reminder: ' : ''}Your job is finished &mdash; did everything go well?`,
+    `<p style="margin:0;">Hi <strong>${esc(customerName)}</strong>, <strong>${esc(techName)}</strong> finished your <strong>${esc(serviceType)}</strong> job (project #${esc(String(projectId))}). Here is the finished work:</p>`,
+    photoStrip(photoUrls) + pay
+    + twoButtons(confirmUrl, 'Everything is fine — confirm & sign', problemUrl, 'Report a problem')
+    + `<p style="color:#8a97a5;font-size:12.5px;line-height:1.6;">Confirming takes one minute from your phone. If something is not right, report it and Helpman support takes it from there &mdash; payments stay on hold until it is solved.</p>`);
+}
+
+function receiptCustomer({ customerName, projectId, serviceType, lines, totalCents }) {
+  const rows = (lines || []).map(([k, c]) => kvRow(k, esc(money(c)))).join('');
+  return brandShell(`Receipt &mdash; project #${esc(String(projectId))} is paid in full`,
+    `<p style="margin:0;">Hi <strong>${esc(customerName)}</strong>, thank you! Your <strong>${esc(serviceType)}</strong> project is paid in full.</p>`,
+    `<table style="margin:16px 0;border-collapse:collapse;" cellpadding="0" cellspacing="0"><tbody>${rows}${kvRow('Total paid', esc(money(totalCents)))}</tbody></table>`
+    + btn(`${baseUrl()}/customer.html`, 'See my project'));
+}
+
+function reviewRequestCustomer({ customerName, techName, projectId, reminder }) {
+  return brandShell(reminder ? 'How did we do? (one minute)' : `Thanks for choosing Helpman &mdash; project #${esc(String(projectId))}`,
+    `<p style="margin:0;">Hi <strong>${esc(customerName)}</strong>, ${reminder ? 'we would love to hear' : 'your project is complete. Tell us'} how <strong>${esc(techName || 'your pro')}</strong> did &mdash; your review helps other neighbors and helps us keep the best pros.</p>`,
+    btn(`${baseUrl()}/customer.html#review`, 'Leave a review'));
+}
+
 module.exports = { notify, shell, esc, projectParties,
   brandShell, welcomeCustomer, welcomeContractor, photoReminder,
   quoteAcceptedCustomer, techAssignedCustomer, jobOfferContractor,
   offerAcceptedContractor, scheduleConfirmedContractor, scheduleConfirmedCustomer,
   contractorPhotoUrl, prettyDay, FLEX_NOTE,
+  dayBeforeReminderCustomer, onTheWayCustomer, arrivedCustomer, workFinishedCustomer, receiptCustomer, reviewRequestCustomer,
   depositConfirmationEmail, contractorAcceptanceEmail,
   scheduleNotificationEmails, completionEmails };
 
@@ -290,10 +359,11 @@ async function completionEmails(projectId) {
     await notify({
       to: customer.email,
       subject: `Your project is complete (#${project.id}) 🎉`,
-      html: shell('Project completed', 'Your project is complete. Please leave a review from your portal:', [
-        ['Project', `#${project.id} — ${job.service_type}`],
-        ['Address', job.address],
-      ]),
+      html: reviewRequestCustomer({
+        customerName: String(customer.name || '').split(' ')[0] || 'there',
+        techName: contractor ? require('./views').displayName(contractor.name) : null,
+        projectId: project.id,
+      }),
     }).catch(() => {});
   }
   if (contractor && contractor.email) {

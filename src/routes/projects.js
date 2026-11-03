@@ -588,7 +588,9 @@ router.post('/:id/on-my-way', authRequired, ah(async (req, res) => {
   const job = await db.prepare('SELECT service_type FROM job_requests WHERE id = ?').get(p.job_request_id);
   const sms = require('../services/sms');
   const out = await sms.textCustomer(p.id, 'on_my_way', sms.T.onTheWay(con ? String(con.name).split(' ')[0] : 'Your technician', job ? job.service_type : 'service'));
-  res.json(out);
+  // Email too, so customers without SMS consent are told as well (once per 30 min).
+  const mail = await require('../services/visit').onTheWay(p.id).catch(() => ({ emailed: false }));
+  res.json({ ...out, emailed: !!mail.emailed });
 }));
 
 const VISIT_OUTCOMES = ['completed', 'customer_no_show', 'contractor_no_show', 'rescheduled'];
@@ -629,63 +631,50 @@ router.post('/:id/sign-off', authRequired, ah(async (req, res) => {
   const p = await loadProject(req, res);
   if (!p) return;
   if (req.user.role !== 'customer') return res.status(403).json({ error: 'Only the customer can sign off on the work.' });
+  const visit = require('../services/visit');
   if (!['in_progress', 'review', 'completed'].includes(p.stage)) {
     return res.status(409).json({ error: 'The work is not ready for sign-off yet.' });
   }
+  const finished = p.stage === 'review' && !!p.departed_at;
   const ms = await db.prepare('SELECT customer_approval FROM milestones WHERE project_id = ?').all(p.id);
-  if (!ms.length || ms.some(m => m.customer_approval !== 'approved')) {
+  if (!finished && (!ms.length || ms.some(m => m.customer_approval !== 'approved'))) {
     return res.status(409).json({ error: 'Approve every milestone before signing off.' });
   }
   if (await db.prepare('SELECT id FROM completion_sheets WHERE project_id = ?').get(p.id)) {
     return res.status(409).json({ error: 'This project is already signed off.' });
   }
   const b = req.body || {};
-  const errors = {};
-  if (!isNonEmpty(b.signer_name, 120)) errors.signer_name = 'Type your full name.';
-  const sig = typeof b.signature === 'string' ? b.signature : '';
-  if (!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(sig) || sig.length < 800) errors.signature = 'Please draw your signature.';
-  else if (sig.length > 300000) errors.signature = 'Signature image is too large.';
-  const cl = b.checklist && typeof b.checklist === 'object' ? b.checklist : {};
-  if (cl.work_complete !== true) errors.work_complete = 'Confirm the work is complete.';
-  if (cl.site_clean !== true) errors.site_clean = 'Confirm the work area is clean.';
-  if (b.notes && !isNonEmpty(b.notes, 1000)) errors.notes = 'Notes are too long.';
-  if (failIfErrors(res, errors)) return;
-
+  if (failIfErrors(res, visit.validateSignOff(b))) return;
   try {
-    await db.prepare(
-      `INSERT INTO completion_sheets (project_id, signer_user_id, signer_name, signature_png, checklist_json, notes, ip)
-       VALUES (?,?,?,?,?,?,?)`
-    ).run(p.id, req.user.id, b.signer_name.trim(), sig,
-      JSON.stringify({ work_complete: true, site_clean: true }), (b.notes || '').trim() || null, req.ip || null);
+    // Signs, closes the project and charges the balance to the saved card (30/70 rule).
+    const out = await visit.confirmWork(p, { userId: req.user.id, b, ip: req.ip || null, via: 'portal' });
+    res.status(201).json(out);
   } catch (e) {
-    // UNIQUE(project_id): a simultaneous second signature loses cleanly.
-    return res.status(409).json({ error: 'This project is already signed off.' });
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message, ...(e.code ? { code: e.code } : {}) });
+    throw e;
   }
-  await auditLog(req.user.id, 'project.signed_off', 'projects', p.id, `Signed by ${b.signer_name.trim()}`);
-  const job = await db.prepare('SELECT service_type, name FROM job_requests WHERE id = ?').get(p.job_request_id);
-  const admins = await db.prepare("SELECT email FROM users WHERE role = 'admin'").all();
-  for (const a of admins) {
-    await notify({
-      to: a.email,
-      subject: `Customer signed off — project #${p.id}`,
-      html: shell('Completion sheet signed', `${job ? job.name : 'The customer'} signed off on the finished work. The final payment is now open to them.`, [
-        ['Project', `#${p.id} — ${job ? job.service_type : ''}`],
-        ['Signed by', b.signer_name.trim()],
-      ]),
-    }).catch(() => {});
-  }
-  const sheet = await db.prepare('SELECT signed_at FROM completion_sheets WHERE project_id = ?').get(p.id);
-  // Owner's 30/70 rule: confirming the work charges the remaining balance to the
-  // saved card automatically. A card problem never undoes the signature.
-  let balance_charge;
-  try {
-    balance_charge = await require('../services/billing').chargeBalance(p.id, { actorId: req.user.id, trigger: 'signoff' });
-  } catch (e) {
-    console.error('[balance charge]', e.message);
-    balance_charge = { status: 'error' };
-  }
-  res.status(201).json({ signed: true, signed_at: sheet.signed_at, balance_charge });
 }));
+
+// ---- Visit: the pro checks in on arrival and checks out with photos of the finished work ----
+async function visitGuard(req, res) {
+  const p = await loadProject(req, res);
+  if (!p) return null;
+  if (!canRunVisit(req)) { res.status(403).json({ error: 'Not allowed.' }); return null; }
+  return p;
+}
+router.post('/:id/check-in', authRequired, ah(async (req, res) => {
+  const p = await visitGuard(req, res); if (!p) return;
+  try { res.json(await projectViewRow(req, await require('../services/visit').checkIn(p, req.user.id))); }
+  catch (e) { if (e.statusCode) return res.status(e.statusCode).json({ error: e.message }); throw e; }
+}));
+router.post('/:id/check-out', authRequired, ah(async (req, res) => {
+  const p = await visitGuard(req, res); if (!p) return;
+  const note = (req.body || {}).note;
+  if (note && !isNonEmpty(note, 500)) return res.status(422).json({ errors: { note: 'Note is too long.' } });
+  try { res.json(await projectViewRow(req, await require('../services/visit').checkOut(p, req.user.id, note))); }
+  catch (e) { if (e.statusCode) return res.status(e.statusCode).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }); throw e; }
+}));
+async function projectViewRow(req, row) { return withDetails(row, req.user.role, req.user); }
 
 // ---- Cancellation and no-show (owner's money rules, admin > Setup > Business rules) ----
 // GET preview: what the customer would get back. POST: do it.
@@ -743,15 +732,15 @@ router.post('/:id/milestones/:mid/complete', authRequired, ah(async (req, res) =
   if (!['admin', 'contractor'].includes(req.user.role)) return res.status(403).json({ error: 'Not allowed.' });
   const m = await db.prepare('SELECT * FROM milestones WHERE id = ? AND project_id = ?').get(req.params.mid, p.id);
   if (!m) return res.status(404).json({ error: 'Milestone not found.' });
-  // Close-out requirement: at least one photo of the finished work AND the signed close-out sheet.
-  const compPhotos = await db.prepare(
-    `SELECT COUNT(*) c FROM photos WHERE project_id = ? AND kind = 'completion'`).get(p.id).c;
-  const signPhotos = await db.prepare(
-    `SELECT COUNT(*) c FROM photos WHERE project_id = ? AND kind = 'signoff'`).get(p.id).c;
-  if (compPhotos < 1 || signPhotos < 1) {
+  // Close-out requirement: at least one photo of the finished work. (Since Corte 3 the
+  // customer signs digitally — from the "work finished" email or the portal — so the
+  // paper close-out sheet is no longer required.)
+  const compPhotos = (await db.prepare(
+    `SELECT COUNT(*) c FROM photos WHERE project_id = ? AND kind = 'completion'`).get(p.id)).c;
+  if (Number(compPhotos) < 1) {
     return res.status(400).json({
-      error: 'Before closing: upload at least one photo of the finished work and a photo of the signed close-out sheet.',
-      missing: { completion_photos: compPhotos < 1, signoff_photo: signPhotos < 1 },
+      error: 'Before closing: upload at least one photo of the finished work.',
+      missing: { completion_photos: true },
     });
   }
   await db.prepare(`UPDATE milestones SET status = 'completed' WHERE id = ?`).run(m.id);

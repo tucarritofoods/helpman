@@ -756,12 +756,14 @@
       const box = body.querySelector('#signoff-box-' + p.id);
       if (!box) return;
       const ms = p.milestones || [];
-      if (!ms.length || ms.some((m) => m.customer_approval !== 'approved')) { box.innerHTML = ''; return; }
+      // The pro tapped "Work finished" (stage review): confirming accepts the whole job.
+      const finished = p.stage === 'review' && !!p.departed_at;
+      if (!finished && (!ms.length || ms.some((m) => m.customer_approval !== 'approved'))) { box.innerHTML = ''; return; }
       let sheet;
       try { sheet = await HP.api('GET', `/projects/${p.id}/sign-off`); } catch (e) { return; }
       if (!sheet.signed) {
-        box.innerHTML = `<hr class="divider"><h4>Completion sheet</h4>
-          <p class="small muted">Every milestone is approved. Sign to confirm the work is finished — this opens your final payment.</p>
+        box.innerHTML = `<hr class="divider"><h4>Confirm the finished work</h4>
+          <p class="small muted">${finished ? 'Your pro finished the job. Check the photos above and sign to confirm everything went well' : 'Every milestone is approved. Sign to confirm the work is finished'} — the remaining balance is then charged to the card you saved with your deposit. Something not right? Use “Report a problem” instead.</p>
           <div class="btn-row"><button class="btn btn-primary btn-sm" id="signoff-btn" type="button">Review &amp; sign</button></div>`;
         box.querySelector('#signoff-btn').addEventListener('click', () => openSignModal(p, () => refreshProject(p.id, body)));
         return;
