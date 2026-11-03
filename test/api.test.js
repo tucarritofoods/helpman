@@ -1714,7 +1714,9 @@ test('REGRESSION: two-step verification — password alone is not enough, codes 
   const stored = await db.prepare('SELECT totp_secret FROM users WHERE id = ?').get(st.id);
   assert.ok(stored.totp_secret && !stored.totp_secret.includes(setup.data.secret), 'secret is stored encrypted');
   assert.equal((await api('POST', '/api/auth/2fa/enable', { code: '000000' }, st.token)).status, 422);
-  const en = await api('POST', '/api/auth/2fa/enable', { code: totp.codeAt(setup.data.secret, Date.now()) }, st.token);
+  // One clock reading for the whole test: re-reading Date.now() made it fail when a 30 s step ended mid-test.
+  const t0 = Date.now();
+  const en = await api('POST', '/api/auth/2fa/enable', { code: totp.codeAt(setup.data.secret, t0) }, st.token);
   assert.equal(en.status, 200);
   assert.equal(en.data.recovery_codes.length, 8);
   const rec = await db.prepare('SELECT totp_recovery FROM users WHERE id = ?').get(st.id);
@@ -1729,8 +1731,8 @@ test('REGRESSION: two-step verification — password alone is not enough, codes 
   assert.equal((await api('POST', '/api/auth/2fa/verify', { challenge: l1.data.challenge, code: '123456' })).status, 401);
   assert.equal((await api('POST', '/api/auth/2fa/verify', { challenge: 'garbage', code: '123456' })).status, 401);
   // The code used to ENABLE 2FA is spent for its 30 s window (anti-replay), so the first sign-in uses the next one.
-  const code = totp.codeAt(setup.data.secret, Date.now() + 30000);
-  assert.equal((await api('POST', '/api/auth/2fa/verify', { challenge: l1.data.challenge, code: totp.codeAt(setup.data.secret, Date.now()) })).status, 401, 'the enrolment code cannot be reused to sign in');
+  const code = totp.codeAt(setup.data.secret, t0 + 30000);
+  assert.equal((await api('POST', '/api/auth/2fa/verify', { challenge: l1.data.challenge, code: totp.codeAt(setup.data.secret, t0) })).status, 401, 'the enrolment code cannot be reused to sign in');
   const v1 = await api('POST', '/api/auth/2fa/verify', { challenge: l1.data.challenge, code });
   assert.equal(v1.status, 200);
   assert.equal((await api('GET', '/api/auth/me', undefined, v1.data.token)).data.totp_enabled, true);

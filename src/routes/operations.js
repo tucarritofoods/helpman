@@ -6,9 +6,12 @@ const { ah, authRequired, requireRole, isNonEmpty, failIfErrors } = require('../
 const { auditLog } = require('../services/audit');
 const ops = require('../services/operations');
 const { rankContractors } = require('../services/matching');
+const { requireStaff } = require('../services/permissions');
 
 const router = express.Router();
-router.use(authRequired, requireRole('admin'));
+// Corte 6: per-area permissions. Before, ANY team role could use every endpoint here,
+// including the money figures in /analytics and offering jobs.
+router.use(authRequired, requireRole('admin'), requireStaff('read'));
 
 router.get('/control-center', ah(async (req,res)=>{
   res.json(await ops.controlCenter());
@@ -75,9 +78,9 @@ router.patch('/tasks/:id', ah(async (req,res)=>{
   res.json(await db.prepare('SELECT * FROM operations_tasks WHERE id=?').get(t.id));
 }));
 
-router.get('/dispatch', ah(async(req,res)=>{
+router.get('/dispatch', requireStaff('dispatch'), ah(async(req,res)=>{
   const rows=await db.prepare(
-    `SELECT p.*, j.service_type,j.city,j.state,j.zip,j.urgency,j.description,
+    `SELECT p.*, j.service_type,j.city,j.state,j.zip,j.urgency,j.description, j.status AS job_status,
             c.legal_name AS contractor_name
      FROM projects p
      JOIN job_requests j ON j.id=p.job_request_id
@@ -91,7 +94,7 @@ router.get('/dispatch', ah(async(req,res)=>{
   res.json(rows);
 }));
 
-router.get('/projects/:id/recommendations', ah(async(req,res)=>{
+router.get('/projects/:id/recommendations', requireStaff('dispatch'), ah(async(req,res)=>{
   const p=await db.prepare(
     `SELECT p.*,j.service_type,j.city,j.state,j.zip,j.urgency
      FROM projects p JOIN job_requests j ON j.id=p.job_request_id
@@ -117,36 +120,19 @@ router.get('/projects/:id/recommendations', ah(async(req,res)=>{
   res.json(ranked);
 }));
 
-router.post('/projects/:id/dispatch/:contractorId', ah(async(req,res)=>{
-  const p=await db.prepare('SELECT * FROM projects WHERE id=?').get(req.params.id);
-  const c=await db.prepare('SELECT * FROM contractors WHERE id=?').get(req.params.contractorId);
-  if(!p) return res.status(404).json({error:'Project not found.'});
-  if(!c || c.status!=='active') return res.status(422).json({error:'Contractor is not active.'});
-  if(!c.license_verified || !c.insurance_verified || c.background_check!=='passed')
-    return res.status(422).json({error:'Contractor is not fully compliant.'});
-
-  await db.prepare(`UPDATE projects SET contractor_id=?,contractor_status='offered',updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-    .run(c.id,p.id);
-
-  try{
-    await db.prepare(`INSERT INTO dispatch_assignments(project_id,contractor_id,match_score,status)
-      VALUES(?,?,?,'offered')`).run(p.id,c.id,(req.body||{}).match_score||null);
-  }catch(_){}
-
-  try{
-    await db.prepare(`INSERT INTO contractor_offer_events(project_id,contractor_id,event_type,detail)
-      VALUES(?,?, 'offered', ?)`).run(p.id,c.id,'Dispatched from Operations Control Center');
-  }catch(_){}
-
-  auditLog(req.user.id,'operations.dispatched','projects',p.id,`Contractor #${c.id} offered`);
-  res.json(await db.prepare('SELECT * FROM projects WHERE id=?').get(p.id));
-}));
+// Corte 6: this used to offer the job directly, skipping every gate of the real flow
+// (deposit paid, pro photo, offer deadline + email, dispatch role, and it could even
+// take a project already in progress away from its pro). Offers now go only through
+// POST /api/projects/:id/assign, which enforces all of them.
+router.post('/projects/:id/dispatch/:contractorId', (req, res) => {
+  res.status(410).json({ error: 'Offer the job from Projects (POST /api/projects/:id/assign); it checks the deposit, the photo and the offer deadline.', code: 'USE_ASSIGN' });
+});
 
 router.get('/risks', ah(async(req,res)=>{
   const risks=[];
 
   const failed=await db.prepare(`SELECT id,project_id,kind,amount_cents FROM payments WHERE status='failed'`).all();
-  failed.forEach(x=>risks.push({severity:'critical',type:'payment',entity_id:x.id,title:`Payment failed — project #${x.project_id}`,detail:`${x.kind} · ${x.amount_cents} cents`}));
+  failed.forEach(x=>risks.push({severity:'critical',type:'payment',entity_id:x.id,title:`Payment failed — project #${x.project_id}`,detail:`${x.kind} · $${(Number(x.amount_cents)/100).toFixed(2)}`}));
 
   const waiting=await db.prepare(`SELECT id,project_id,title FROM milestones WHERE status='completed' AND customer_approval='pending'`).all();
   waiting.forEach(x=>risks.push({severity:'warning',type:'milestone',entity_id:x.id,title:`Approval pending — project #${x.project_id}`,detail:x.title}));
@@ -184,7 +170,7 @@ router.get('/notes/:entityType/:entityId', ah(async(req,res)=>{
   ).all(req.params.entityType,req.params.entityId));
 }));
 
-router.get('/analytics', ah(async(req,res)=>{
+router.get('/analytics', requireStaff('finance'), ah(async(req,res)=>{
   const leads=await db.prepare(`SELECT source,COUNT(*) c,
     SUM(CASE WHEN status IN ('assigned','scheduled','in_progress','review','completed') THEN 1 ELSE 0 END) converted
     FROM job_requests GROUP BY source ORDER BY c DESC`).all();

@@ -62,12 +62,12 @@ router.get('/jobs/:id/risk',authRequired,ah(async(req,res)=>{
   res.json({...row,flags:JSON.parse(row.flags_json||'[]')});
 }));
 
-router.get('/admin/runs',authRequired,requireRole('admin'),ah(async(req,res)=>{
+router.get('/admin/runs',authRequired,requireRole('admin'),require('../services/permissions').requireStaff('read'),ah(async(req,res)=>{
   const lim=Math.min(200,Math.max(1,Number(req.query.limit||50)));
   res.json(await db.prepare('SELECT * FROM ai_runs ORDER BY id DESC LIMIT ?').all(lim));
 }));
 
-router.get('/admin/security-events',authRequired,requireRole('admin'),ah(async(req,res)=>{
+router.get('/admin/security-events',authRequired,requireRole('admin'),require('../services/permissions').requireStaff('staff'),ah(async(req,res)=>{
   const lim=Math.min(300,Math.max(1,Number(req.query.limit||100)));
   res.json(await db.prepare('SELECT * FROM security_events ORDER BY id DESC LIMIT ?').all(lim));
 }));

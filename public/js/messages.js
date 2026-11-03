@@ -80,7 +80,9 @@ const HPMsg = (() => {
     let timer = null;
 
     function setNotice(kind) {
-      notice.textContent = kind === 'client_support'
+      notice.textContent = o.allowKindSwitch
+        ? (kind === 'support_contractor' ? 'Conversation with the pro. The customer never sees it.' : 'Conversation with the customer. The pro never sees it.')
+        : kind === 'client_support'
         ? 'You are chatting with Helpman support. Your contractor never sees this conversation.'
         : kind === 'support_contractor'
           ? 'You are chatting with Helpman support about this project. The customer never sees this conversation.'

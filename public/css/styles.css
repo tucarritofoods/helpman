@@ -132,6 +132,12 @@ a { color: var(--info); }
   outline: 2px solid var(--amber); outline-offset: 1px; border-color: var(--amber);
 }
 .field textarea { min-height: 5.5rem; resize: vertical; }
+/* Corte 6: controls used outside a .field (filters, inline table edits, invite rows)
+   get the same look, slightly smaller. :where() keeps .field rules in charge. */
+:where(.tab-panel, .section, .modal-body) :where(select, input[type="text"], input[type="email"], input[type="tel"], input[type="number"], input[type="date"], input[type="datetime-local"], input[type="search"]):not(.field *) {
+  font: inherit; font-size: .9rem; padding: .45rem .6rem; border: 1.5px solid var(--line); border-radius: .55rem; background: #fff; color: var(--ink); min-height: 2.25rem;
+}
+:where(.tab-panel, .section, .modal-body) :where(select, input):not(.field *):focus { outline: 2px solid var(--amber); outline-offset: 1px; border-color: var(--amber); }
 .field .hint { font-size: .82rem; color: var(--muted); margin-top: .25rem; }
 .field-error { color: var(--err); font-size: .85rem; margin-top: .25rem; min-height: 1.1em; display: block; }
 .field-invalid { border-color: var(--err) !important; }

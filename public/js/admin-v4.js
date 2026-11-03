@@ -2,27 +2,10 @@
 (function(){
   'use strict';
 
-  function addOpsTabs(){
-    const tabs=document.getElementById('admin-tabs');
-    if(!tabs || document.querySelector('[data-tab="ops-center"]')) return;
-    const defs=[['ops-center','Control Center'],['dispatch-v4','Dispatch'],['risks-v4','Risks']];
-    defs.reverse().forEach(([key,label])=>{
-      const b=document.createElement('button'); b.className='tab'; b.dataset.tab=key; b.setAttribute('role','tab'); b.textContent=label;
-      tabs.insertBefore(b,tabs.firstChild);
-      const s=document.createElement('section'); s.className='tab-panel'; s.id='panel-'+key; s.setAttribute('role','tabpanel');
-      s.innerHTML=`<div id="hm4-${key}"><p class="muted">Loading…</p></div>`;
-      tabs.parentNode.insertBefore(s,tabs.nextElementSibling);
-    });
-
-    document.querySelectorAll('#admin-tabs .tab').forEach(t=>{
-      t.addEventListener('click',()=>{
-        if(t.dataset.tab==='ops-center') loadControlCenter();
-        if(t.dataset.tab==='dispatch-v4') loadDispatch();
-        if(t.dataset.tab==='risks-v4') loadRisks();
-      });
-    });
-    document.querySelector('[data-tab="ops-center"]').click();
-  }
+  // Corte 6: these used to be three extra tabs injected in front of the menu, which
+  // broke the first screen for every team member. They now render inside existing
+  // screens: Control Center + Risks in Overview, the assignment board in Projects.
+  const can=(a)=>(window.__perms||[]).includes(a);
 
   const priKind=p=>p==='critical'?'warn':p==='high'?'warn':p==='medium'?'info':'muted';
 
@@ -32,11 +15,11 @@
       await HP.api('POST','/operations/generate',{}).catch(()=>({}));
       const [d,a]=await Promise.all([
         HP.api('GET','/operations/control-center'),
-        HP.api('GET','/operations/analytics')
+        can('finance')?HP.api('GET','/operations/analytics').catch(()=>null):Promise.resolve(null)
       ]);
       const k=d.kpis;
       box.innerHTML=`
-        <div class="hm4-title-row"><div><span class="eyebrow">HELPMAN OPERATIONS</span><h2>What needs attention now</h2><p>One queue for sales, dispatch, project execution, customer approvals, payments and compliance.</p></div>
+        <div class="hm4-title-row"><div><h2>What needs attention now</h2><p class="small muted">One queue for sales, dispatch, project execution, customer approvals, payments and compliance.</p></div>
           <button class="btn btn-outline" id="hm4-refresh">Refresh</button></div>
         <div class="hm4-kpis">
           ${[
@@ -45,11 +28,11 @@
             ['Approvals',k.customer_approvals],['Failed payments',k.failed_payments],['Open tasks',k.open_tasks]
           ].map(([l,v])=>`<div><span>${l}</span><strong>${v}</strong></div>`).join('')}
         </div>
-        <div class="hm4-grid">
+        <div class="hm4-grid"${a?'':' style="grid-template-columns:1fr"'}>
           <section class="card"><div class="section-head"><h3>Priority queue</h3><button class="btn btn-dark btn-sm" id="hm4-new-task">New task</button></div>
             <div id="hm4-queue">${d.queue.length?d.queue.map(taskRow).join(''):'<p class="muted">Queue is clear.</p>'}</div>
           </section>
-          <section class="card"><h3>Business pulse</h3>
+          ${a?`<section class="card"><h3>Business pulse</h3>
             <div class="hm4-economics">
               <div><span>Revenue</span><strong>${HP.fmtMoney(a.economics.revenue_cents)}</strong></div>
               <div><span>Gross profit</span><strong>${HP.fmtMoney(a.economics.gross_profit_cents)}</strong></div>
@@ -58,7 +41,7 @@
             </div>
             <h4>Acquisition</h4>
             ${a.acquisition.length?a.acquisition.map(x=>`<div class="hm4-bar-row"><span>${HP.esc(x.source)}</span><div><i style="width:${Math.min(100,x.conversion_pct)}%"></i></div><b>${x.conversion_pct}%</b><small>${x.converted}/${x.leads}</small></div>`).join(''):'<p class="muted">No source data yet.</p>'}
-          </section>
+          </section>`:''}
         </div>`;
       document.getElementById('hm4-refresh').onclick=loadControlCenter;
       document.getElementById('hm4-new-task').onclick=createManualTask;
@@ -79,32 +62,35 @@
   function wireTasks(box){
     box.querySelectorAll('[data-task-status]').forEach(b=>b.onclick=async()=>{
       const row=b.closest('[data-task]');
-      await HP.api('PATCH','/operations/tasks/'+row.dataset.task,{status:b.dataset.taskStatus});
-      HP.toast('Task updated.','ok'); loadControlCenter();
+      try{await HP.api('PATCH','/operations/tasks/'+row.dataset.task,{status:b.dataset.taskStatus});
+      HP.toast('Task updated.','ok'); loadControlCenter();}catch(e){HP.toast(HP.friendlyMessage(e),'error');}
     });
   }
 
   async function createManualTask(){
     const title=prompt('Task title:'); if(!title)return;
     const detail=prompt('Details (optional):')||'';
-    await HP.api('POST','/operations/tasks',{title,detail,priority:'medium'});
-    HP.toast('Task created.','ok'); loadControlCenter();
+    try{await HP.api('POST','/operations/tasks',{title,detail,priority:'medium'});
+    HP.toast('Task created.','ok'); loadControlCenter();}catch(e){HP.toast(HP.friendlyMessage(e),'error');}
   }
 
+  const DEPOSIT_OK=['deposit_paid','assigned','scheduled','in_progress','review'];
   async function loadDispatch(){
     const box=document.getElementById('hm4-dispatch-v4'); if(!box)return;
+    if(!can('dispatch')){box.closest('.section')&&(box.closest('.section').hidden=true);return;}
     try{
-      const rows=await HP.api('GET','/operations/dispatch');
-      box.innerHTML=`<div class="hm4-title-row"><div><span class="eyebrow">DISPATCH</span><h2>Project assignment board</h2><p>Unassigned and urgent work appears first. Recommendations remain explainable and compliance-gated.</p></div></div>
-      <div class="hm4-dispatch-list">${rows.length?rows.map(p=>`
+      const rows=(await HP.api('GET','/operations/dispatch')).filter(p=>!p.contractor_id||p.contractor_status==='declined');
+      box.innerHTML=`<div class="section-head"><h2>Needs a pro</h2></div>
+      <p class="small muted">Projects without a pro, urgent first. "Find best match" ranks verified pros; the offer goes out with the normal rules (deposit paid, pro photo, 24-hour deadline).</p>
+      <div class="hm4-dispatch-list">${rows.length?rows.map(p=>{const paid=DEPOSIT_OK.includes(p.job_status);return `
         <article class="card hm4-dispatch-card">
           <div class="section-head"><div><strong>Project #${p.id}</strong><div class="small muted">${HP.esc(p.service_type)} · ${HP.esc([p.city,p.state,p.zip].filter(Boolean).join(' '))}</div></div>
-            ${HP.badge(p.contractor_id?'Assigned':'Needs contractor',p.contractor_id?'ok':'warn')}</div>
+            ${HP.badge(paid?'Needs a pro':'Waiting for deposit',paid?'warn':'muted')}</div>
           <div class="small">${HP.esc(p.description||'')}</div>
-          <div class="hm4-dispatch-meta"><span>Stage: ${HP.esc(p.stage)}</span><span>Urgency: ${HP.esc(p.urgency)}</span><span>${p.contractor_name?HP.esc(p.contractor_name):'No contractor'}</span></div>
-          <button class="btn btn-primary btn-sm" data-rec="${p.id}">Find best match</button>
+          <div class="hm4-dispatch-meta"><span>Urgency: ${HP.esc(p.urgency)}</span></div>
+          <button class="btn btn-primary btn-sm" data-rec="${p.id}" ${paid?'':'disabled title="The deposit is not in yet"'}>Find best match</button>
           <div class="hm4-rec" id="hm4-rec-${p.id}"></div>
-        </article>`).join(''):'<p class="muted">No active projects.</p>'}</div>`;
+        </article>`;}).join(''):'<p class="muted">Every active project has a pro.</p>'}</div>`;
       box.querySelectorAll('[data-rec]').forEach(b=>b.onclick=()=>loadRecommendations(b.dataset.rec));
     }catch(e){box.innerHTML=`<div class="banner banner-warn">${HP.esc(HP.friendlyMessage(e))}</div>`;}
   }
@@ -122,8 +108,8 @@
       }).join('');
       out.querySelectorAll('[data-dispatch]').forEach(b=>b.onclick=async()=>{
         if(!confirm('Offer this project to the selected professional?'))return;
-        await HP.api('POST',`/operations/projects/${pid}/dispatch/${b.dataset.dispatch}`,{match_score:Number(b.dataset.score)});
-        HP.toast('Job offered.','ok'); loadDispatch();
+        try{await HP.api('POST',`/projects/${pid}/assign`,{contractor_id:Number(b.dataset.dispatch)});
+        HP.toast('Job offered. The pro has 24 hours to answer.','ok'); loadDispatch();}catch(e){HP.toast(HP.friendlyMessage(e),'error');}
       });
     }catch(e){out.innerHTML=`<p class="muted">${HP.esc(HP.friendlyMessage(e))}</p>`;}
   }
@@ -132,7 +118,7 @@
     const box=document.getElementById('hm4-risks-v4'); if(!box)return;
     try{
       const rows=await HP.api('GET','/operations/risks');
-      box.innerHTML=`<div class="hm4-title-row"><div><span class="eyebrow">RISK CENTER</span><h2>Exceptions and operational risk</h2><p>Failed payments, unassigned projects, customer approvals and compliance expirations.</p></div></div>
+      box.innerHTML=`<div class="section-head"><h2>Exceptions</h2></div><p class="small muted">Failed payments, unassigned projects, customer approvals and expiring compliance documents.</p>
         <div class="hm4-risk-grid">${rows.length?rows.map(x=>`
           <article class="card hm4-risk ${x.severity}">
             <span class="eyebrow">${HP.esc(x.severity)}</span><h3>${HP.esc(x.title)}</h3><p>${HP.esc(x.detail||'')}</p>
@@ -140,5 +126,5 @@
     }catch(e){box.innerHTML=`<div class="banner banner-warn">${HP.esc(HP.friendlyMessage(e))}</div>`;}
   }
 
-  document.addEventListener('DOMContentLoaded',addOpsTabs);
+  window.HMOps={loadControlCenter,loadDispatch,loadRisks};
 })();

@@ -87,6 +87,7 @@ async function runPage(name, creds, extras) {
     sessionStorage: { getItem() { return null; }, setItem() {}, removeItem() {} },
     location: { href: 'http://localhost/' + name + '.html', origin: 'http://localhost', pathname: '/' + name + '.html', search: '', hash: '', assign() {}, replace() {}, reload() {} },
     history: { replaceState() {}, pushState() {} },
+    addEventListener() {}, removeEventListener() {}, CSS: { escape: (s) => String(s) },
     navigator: { clipboard: { writeText: async () => {} }, userAgent: 'node-harness' },
     confirm: () => true, prompt: () => 'x', alert() {},
     fetch: (url, opts) => { pending++; out.calls++; const u = String(url).startsWith('/') ? BASE + url : url; return realFetch(u, opts).then((r) => { if (r.status >= 500) out.apiFails.push(r.status + ' ' + (opts && opts.method || 'GET') + ' ' + url); return r; }).finally(() => pending--); },

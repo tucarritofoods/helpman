@@ -2,22 +2,8 @@
 (function(){
   'use strict';
 
-  function addTabs(){
-    const tabs=document.getElementById('admin-tabs');
-    if(!tabs || document.querySelector('[data-tab="intelligence-v5"]')) return;
-    const defs=[['intelligence-v5','Intelligence'],['security-v5','Security']];
-    defs.reverse().forEach(([key,label])=>{
-      const b=document.createElement('button');b.className='tab';b.dataset.tab=key;b.setAttribute('role','tab');b.textContent=label;
-      tabs.insertBefore(b,tabs.firstChild);
-      const s=document.createElement('section');s.className='tab-panel';s.id='panel-'+key;s.setAttribute('role','tabpanel');
-      s.innerHTML=`<div id="hm5-${key}"><p class="muted">Loading…</p></div>`;
-      tabs.parentNode.insertBefore(s,tabs.nextElementSibling);
-    });
-    document.querySelectorAll('#admin-tabs .tab').forEach(t=>t.addEventListener('click',()=>{
-      if(t.dataset.tab==='intelligence-v5') loadIntelligence();
-      if(t.dataset.tab==='security-v5') loadSecurity();
-    }));
-  }
+  // Corte 6: no longer extra tabs. The AI activity log lives in Reports › AI and the
+  // security events in Security (owners only).
 
   async function loadIntelligence(){
     const box=document.getElementById('hm5-intelligence-v5');if(!box)return;
@@ -28,9 +14,7 @@
       const avg=runs.filter(r=>r.confidence!=null).length
         ?Math.round(runs.filter(r=>r.confidence!=null).reduce((a,b)=>a+Number(b.confidence||0),0)/runs.filter(r=>r.confidence!=null).length):0;
       box.innerHTML=`
-        <div class="hm5-hero"><div><span class="eyebrow">HELPMAN INTELLIGENCE</span><h2>AI that understands the project — with guardrails</h2>
-          <p>Scope, photo signals, risk and confidence are logged and reviewable. AI assists; deterministic systems and humans control pricing, compliance and dispatch.</p></div>
-          <div class="hm5-ai-badge">AI<br><small>with controls</small></div></div>
+        <p class="small muted">Every AI run (scope, photo signals, risk) is logged here. AI assists; prices, compliance and dispatch are decided by fixed rules and people.</p>
         <div class="hm5-kpis">
           <div><span>Recent AI runs</span><strong>${runs.length}</strong></div>
           <div><span>Average confidence</span><strong>${avg}%</strong></div>
@@ -45,15 +29,15 @@
     }catch(e){box.innerHTML=`<div class="banner banner-warn">${HP.esc(HP.friendlyMessage(e))}</div>`;}
   }
 
-  async function loadSecurity(){
+  async function loadSecurityEvents(){
     const box=document.getElementById('hm5-security-v5');if(!box)return;
+    if(!(window.__perms||[]).includes('staff')){box.closest('.section')&&(box.closest('.section').hidden=true);return;}
     try{
       const rows=await HP.api('GET','/intelligence/admin/security-events?limit=150');
       const crit=rows.filter(x=>x.severity==='critical').length;
       const warn=rows.filter(x=>x.severity==='warning').length;
       box.innerHTML=`
-        <div class="hm5-title"><span class="eyebrow">TRUST & SECURITY</span><h2>Security event center</h2>
-          <p>Authentication, suspicious behavior and sensitive security actions should become observable rather than disappearing into logs.</p></div>
+        <p class="small muted">Sign-in problems, suspicious behavior and sensitive security actions.</p>
         <div class="hm5-kpis"><div><span>Recent events</span><strong>${rows.length}</strong></div><div><span>Critical</span><strong>${crit}</strong></div><div><span>Warnings</span><strong>${warn}</strong></div></div>
         <div class="card"><h3>Events</h3>
           ${rows.length?rows.map(x=>`<div class="hm5-event ${x.severity}"><div><strong>${HP.esc(x.event_type)}</strong><small>${HP.fmtDateTime(x.created_at)} · ${HP.esc(x.ip_prefix||'')}</small></div><span>${HP.esc(x.severity)}</span></div>`).join(''):'<p class="muted">No recorded security events yet.</p>'}
@@ -61,5 +45,5 @@
     }catch(e){box.innerHTML=`<div class="banner banner-warn">${HP.esc(HP.friendlyMessage(e))}</div>`;}
   }
 
-  document.addEventListener('DOMContentLoaded',addTabs);
+  window.HMTrust={loadIntelligence,loadSecurityEvents};
 })();

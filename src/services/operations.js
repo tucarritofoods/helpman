@@ -127,7 +127,7 @@ async function generateOperationalTasks() {
   for (const pay of failed) {
     made.push(await upsertSystemTask({
       title: `Payment failed — project #${pay.project_id}`,
-      detail: `${pay.kind} · ${pay.amount_cents} cents`,
+      detail: `${pay.kind} · $${(Number(pay.amount_cents) / 100).toFixed(2)}`,
       entityType: 'payment', entityId: pay.id, priority: 'critical', source: 'payment',
       fingerprint: `payment:failed:${pay.id}`
     }));

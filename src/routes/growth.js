@@ -6,7 +6,7 @@ const {ah,authRequired,requireRole,isNonEmpty}=require('../middleware');
 
 const router=express.Router();
 
-router.get('/admin/growth',authRequired,requireRole('admin'),ah(async(req,res)=>{
+router.get('/admin/growth',authRequired,requireRole('admin'),require('../services/permissions').requireStaff('read'),ah(async(req,res)=>{
   const bySource=await db.prepare(`
     SELECT COALESCE(source,'direct') source,COUNT(*) leads,
       SUM(CASE WHEN status IN ('assigned','scheduled','in_progress','review','completed') THEN 1 ELSE 0 END) converted
