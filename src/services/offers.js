@@ -4,6 +4,7 @@
 // The portal endpoints in routes/projects.js reuse the same core functions.
 'use strict';
 const db = require('../db');
+const { displayName } = require('./views');
 const magic = require('./magiclink');
 const { auditLog } = require('./audit');
 const { touchInteraction } = require('./crm');
@@ -101,7 +102,7 @@ async function acceptOffer(p, { userId, ip }) {
       subject: `Your technician has been assigned — project #${p.id}`,
       html: techAssignedCustomer({
         customerName: String(cust.name || 'there').split(' ')[0],
-        techName: cont ? cont.user_name : 'Assigned pro',
+        techName: cont ? displayName(cont.user_name) : 'Assigned pro',
         photoUrl: cont ? contractorPhotoUrl(cont) : null,
         projectId: p.id,
         serviceType: job.service_type,
@@ -185,6 +186,8 @@ async function sendScheduleConfirmation(p) {
         name: cont.user_name.split(' ')[0], projectId: p.id, day,
         window: p.arrival_window || '',
         acceptUrl: links.acceptUrl, declineUrl: links.declineUrl,
+        // The job is accepted by now: the pro needs the street address to get there.
+        address: job ? [job.address, job.city, job.zip].filter(Boolean).join(', ') : '',
       }),
     }).catch(() => {});
   }
@@ -195,7 +198,7 @@ async function sendScheduleConfirmation(p) {
       subject: `Your visit is scheduled — ${prettyDay(day)} (#${p.id})`,
       html: scheduleConfirmedCustomer({
         customerName: String(cust.name || 'there').split(' ')[0],
-        techName: cont.user_name,
+        techName: displayName(cont.user_name),
         photoUrl: contractorPhotoUrl(cont),
         projectId: p.id, day, window: p.arrival_window || '',
       }),

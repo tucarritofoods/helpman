@@ -20,13 +20,14 @@ router.get('/offers/:token', ah(async (req, res) => {
     await offers.releaseExpiredOffers();
     return res.status(410).json({ error: 'This offer expired with no answer.' });
   }
-  const job = await db.prepare('SELECT service_type, address, city, description FROM job_requests WHERE id = ?').get(project.job_request_id);
+  const job = await db.prepare('SELECT service_type, city, zip, description FROM job_requests WHERE id = ?').get(project.job_request_id);
   const cont = await db.prepare('SELECT u.name FROM contractors c JOIN users u ON u.id = c.user_id WHERE c.id = ?').get(project.contractor_id);
   res.json({
     project_id: project.id,
     service_type: job.service_type,
-    address: [job.address, job.city].filter(Boolean).join(', '),
-    description: (job.description || '').slice(0, 300),
+    // Before accepting, the pro sees the area (city + ZIP), never the street address.
+    address: [job.city, job.zip].filter(Boolean).join(' '),
+    description: require('../services/views').redactContacts((job.description || '').slice(0, 300)),
     contractor_name: cont ? cont.name : '',
     expires_at: project.offer_expires_at,
   });
@@ -49,7 +50,9 @@ router.post('/offers/:token/respond', ah(async (req, res) => {
   }
   const crow = await db.prepare('SELECT user_id FROM contractors WHERE id = ?').get(project.contractor_id);
   const out = await offers.acceptOffer(project, { userId: crow && crow.user_id, ip: req.ip || null });
-  res.json({ accepted: true, project: out });
+  // A magic-link caller is the contractor: answer with the contractor's view only
+  // (never the customer price), like the portal does.
+  res.json({ accepted: true, project: require('../services/views').projectForContractor(out) });
 }));
 
 // Public summary for the schedule-confirmation page (same offer.html).

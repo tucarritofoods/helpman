@@ -14,7 +14,8 @@ const offers = require('../services/offers');
 
 const router = express.Router();
 
-const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads');
+const { UPLOAD_DIR } = require('../services/paths');
+const views = require('../services/views');
 const upload = multer({
   dest: UPLOAD_DIR,
   limits: { fileSize: 5 * 1024 * 1024, files: 6 },
@@ -58,24 +59,22 @@ async function withDetails(p, role, user) {
     return full;
   }
   if (role === 'customer') {
-    const { contractor_cost_cents, ...proj } = full;
-    const c = full.contractor;
     const { contractorPhotoUrl } = require('../services/notify');
-    proj.contractor = c ? {
-      first_name: String(c.name || '').split(' ')[0],
-      // The assigned customer sees the technician's photo (token URL) — never
-      // the phone, email, or cost.
-      photo_url: contractorPhotoUrl(c),
-      rating_avg: c.rating_avg,
-      jobs_completed: c.jobs_completed,
-      license_verified: !!c.license_verified,
-      insurance_verified: !!c.insurance_verified,
-    } : null;
-    return proj;
+    // The assigned customer sees the technician's first name + initial, photo
+    // (token URL) and verification badges — never the phone, email or cost.
+    return views.projectForCustomer(full, full.contractor ? contractorPhotoUrl(full.contractor) : null);
   }
-  // contractor: keeps their own budget (contractor_cost_cents), loses price + payments.
-  const { customer_price_cents, payments, contractor, ...proj } = full;
-  return proj;
+  // contractor: a whitelist — their own budget and the work to do, nothing about
+  // the customer they could use to go around the platform.
+  return views.projectForContractor(full);
+}
+
+// What the CALLER may see of a bare projects row (used by write endpoints that
+// answer with the updated project).
+async function projectView(req, projectId) {
+  const row = await db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
+  if (!row) return null;
+  return withDetails(row, req.user.role, req.user);
 }
 
 async function loadProject(req, res) {
@@ -251,7 +250,9 @@ router.post('/:id/assign', authRequired, requireStaff('dispatch'), ah(async (req
       subject: `New job offer — ${job.service_type} (#${p.id})`,
       html: jobOfferContractor({
         name: cu.name.split(' ')[0], projectId: p.id, serviceType: job.service_type,
-        address: job.address, budget: '$' + (p.contractor_cost_cents / 100).toFixed(2),
+        // City + ZIP only: the street address is released when the pro accepts.
+        address: [job.city, job.zip].filter(Boolean).join(' ') || 'Service area',
+        budget: '$' + (p.contractor_cost_cents / 100).toFixed(2),
         acceptUrl: links.acceptUrl, declineUrl: links.declineUrl,
         expiresNote: 'The offer expires in 24 hours.',
       }),
@@ -288,8 +289,8 @@ router.post('/:id/contractor-respond', authRequired, ah(async (req, res) => {
   if (!termsAccepted) {
     return res.status(400).json({ error: 'You must accept the Independent Contractor Terms to take this job.' });
   }
-  const project = await offers.acceptOffer(p, { userId: req.user.id, ip: req.ip || null });
-  res.json({ accepted: true, project });
+  await offers.acceptOffer(p, { userId: req.user.id, ip: req.ip || null });
+  res.json({ accepted: true, project: await projectView(req, p.id) });
 }));
 
 // ---- Negotiation (CaliFix-style): contractor counter-offers the offered budget ----
@@ -348,7 +349,7 @@ router.get('/:id/offers', authRequired, ah(async (req, res) => {
 }));
 
 // ---- Admin: accept a counter-offer (updates the contractor budget, notifies the pro) ----
-router.post('/:id/offers/:oid/accept', authRequired, requireRole('admin'), ah(async (req, res) => {
+router.post('/:id/offers/:oid/accept', authRequired, requireStaff('dispatch'), ah(async (req, res) => {
   const p = await db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
   if (!p) return res.status(404).json({ error: 'Project not found.' });
   const o = await db.prepare('SELECT * FROM contractor_offers WHERE id = ? AND project_id = ?').get(req.params.oid, p.id);
@@ -381,7 +382,7 @@ router.post('/:id/offers/:oid/accept', authRequired, requireRole('admin'), ah(as
 }));
 
 // ---- Admin: reject a counter-offer ----
-router.post('/:id/offers/:oid/reject', authRequired, requireRole('admin'), ah(async (req, res) => {
+router.post('/:id/offers/:oid/reject', authRequired, requireStaff('dispatch'), ah(async (req, res) => {
   const o = await db.prepare('SELECT * FROM contractor_offers WHERE id = ? AND project_id = ?').get(req.params.oid, req.params.id);
   if (!o) return res.status(404).json({ error: 'Offer not found.' });
   if (o.status !== 'pending') return res.status(400).json({ error: 'This offer is no longer pending.' });
@@ -562,7 +563,7 @@ router.patch('/:id/stage', authRequired, ah(async (req, res) => {
     await completionEmails(p.id);
   }
   await auditLog(req.user.id, 'project.stage', 'projects', p.id, `Stage → ${stage}`);
-  res.json(await db.prepare('SELECT * FROM projects WHERE id = ?').get(p.id));
+  res.json(await projectView(req, p.id));
 }));
 
 // ---- Visit day: "technician is on the way" text + visit outcomes (feeds the no-show KPI) ----
@@ -705,7 +706,7 @@ router.post('/:id/milestones/:mid/complete', authRequired, ah(async (req, res) =
     await notify({
       to: custEmail,
       subject: `Milestone done — please review: ${m.title}`,
-      html: shell('A milestone is ready for your review', `${req.user.name} marked a milestone as complete:`, [
+      html: shell('A milestone is ready for your review', `${req.user.role === 'contractor' ? views.displayName(req.user.name) : 'Helpman'} marked a milestone as complete:`, [
         ['Project', `#${p.id} — ${job.service_type}`],
         ['Milestone', m.title],
       ]),
@@ -765,13 +766,16 @@ router.post('/:id/photos', authRequired, preflightProject, upload.array('photos'
   const p = req.project;
   const kind = ['progress', 'completion', 'signoff'].includes((req.body || {}).kind) ? req.body.kind : 'progress';
   const saved = [];
+  const photostore = require('../services/photostore');
+  // Every file must be a real image BEFORE any is stored (no half-saved batches).
+  await photostore.assertImages(req.files || []);
   for (const f of req.files || []) {
     // Same storage path as request photos: honors S3 when configured.
-    const { opt, filename, storageKey, storageProvider } = await require('../services/photostore').persist(f, 'project');
+    const { opt, filename, storageKey, storageProvider } = await photostore.persist(f, 'project');
     const info = await db.prepare(
       `INSERT INTO photos (project_id, filename, original_name, mime, size_bytes, width, height, kind, uploaded_by, storage_key, storage_provider)
        VALUES (?,?,?,?,?,?,?,?,?,?,?)`
-    ).run(p.id, filename, f.originalname, f.mimetype, opt.size, opt.width, opt.height, kind, req.user.id, storageKey, storageProvider);
+    ).run(p.id, filename, photostore.safeOriginalName(f.originalname), f.mimetype, opt.size, opt.width, opt.height, kind, req.user.id, storageKey, storageProvider);
     saved.push({ ...await db.prepare('SELECT id, original_name, mime, kind, created_at FROM photos WHERE id = ?').get(info.lastInsertRowid), optimized: opt.optimized });
   }
   res.status(201).json({ photos: saved });

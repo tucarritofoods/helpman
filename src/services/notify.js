@@ -72,7 +72,7 @@ function contractorPhotoUrl(c) {
 
 const { baseUrl } = require('./magiclink');
 
-function logoUrl() { return `${baseUrl()}/img/logo-header.jpg`; }
+function logoUrl() { return `${baseUrl()}/img/helpman-logo-primary.png`; }
 
 function brandShell(title, intro, bodyHtml) {
   return `<!doctype html><html><body style="margin:0;padding:0;background-color:#f6f8fb;">
@@ -165,7 +165,7 @@ function jobOfferContractor({ name, projectId, serviceType, address, budget, acc
     `<p style="margin:0;">Hi <strong>${esc(name)}</strong>, Helpman by Mendoza Capital LLC is offering you a project.${expiresNote ? ` <strong>${esc(expiresNote)}</strong>` : ''}</p>`,
     `<table style="margin:16px 0;border-collapse:collapse;" cellpadding="0" cellspacing="0"><tbody>`
     + kvRow('Project', `#${esc(String(projectId))} &mdash; ${esc(serviceType)}`)
-    + kvRow('Address', esc(address))
+    + kvRow('Area', esc(address) + '<br><span style="font-weight:400;color:#8a97a5;font-size:12px;">Exact address shared once you accept.</span>')
     + kvRow('Your budget', esc(budget))
     + `</tbody></table>
     <p style="color:#5b6b7e;font-size:14px;line-height:1.65;">Answer right from this email &mdash; no login needed. Accepting means you agree to the Independent Contractor Terms.</p>
@@ -183,10 +183,11 @@ function offerAcceptedContractor(name, projectId, serviceType) {
 }
 
 // Day + arrival window confirmed: contractor confirms or declines the slot.
-function scheduleConfirmedContractor({ name, projectId, day, window, acceptUrl, declineUrl }) {
+function scheduleConfirmedContractor({ name, projectId, day, window, acceptUrl, declineUrl, address }) {
   return brandShell(`Appointment confirmed &mdash; ${esc(prettyDay(day))} (#${esc(String(projectId))})`,
     `<p style="margin:0;">Hi <strong>${esc(name)}</strong>, your appointment is confirmed for <strong>${esc(prettyDay(day))}</strong>${window ? `, arrival window <strong>${esc(window)}</strong>` : ''}.</p>`,
-    `<p style="color:#5b6b7e;font-size:14px;line-height:1.65;">Please confirm you can make it, or decline so we can reassign in time:</p>
+    (address ? `<table style="margin:14px 0;border-collapse:collapse;" cellpadding="0" cellspacing="0"><tbody>${kvRow('Address', esc(address))}</tbody></table>` : '')
+    + `<p style="color:#5b6b7e;font-size:14px;line-height:1.65;">Please confirm you can make it, or decline so we can reassign in time. Questions about the job? Message Helpman support from your portal &mdash; never contact the customer directly.</p>
     <p style="text-align:center;margin:24px 0 8px;">
       <a href="${esc(acceptUrl)}" style="background:#1f8a4c;color:#ffffff;padding:13px 30px;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;display:inline-block;margin:0 6px 8px 0;box-shadow:0 2px 6px rgba(31,138,76,.35);">I confirm</a>
       <a href="${esc(declineUrl)}" style="background:#ffffff;color:#143d7a;padding:11px 28px;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;display:inline-block;border:2px solid #e2e8f0;">I can&apos;t make it</a>

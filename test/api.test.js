@@ -214,7 +214,7 @@ test('contractor offer → accept requires terms; decline releases the project',
 
   // Profile photo first: no contractor can be offered a job without one.
   const pform = new FormData();
-  pform.append('photo', new Blob([Buffer.from('fake profile bytes')], { type: 'image/jpeg' }), 'me.jpg');
+  pform.append('photo', new Blob([PNG_1PX], { type: 'image/png' }), 'me.jpg');
   const ph = await api('POST', '/api/contractors/me/photo', undefined, contToken, pform);
   assert.equal(ph.status, 201);
   assert.ok(ph.data.photo_url && ph.data.photo_url.includes('/api/contractor-photos/'), 'photo url returned');
@@ -2234,7 +2234,7 @@ test('contractor photo upload: validation, storage, serving', async () => {
 
   // valid upload (replace works too)
   const f2 = new FormData();
-  f2.append('photo', new Blob([Buffer.from('fake profile bytes 2')], { type: 'image/jpeg' }), 'me2.jpg');
+  f2.append('photo', new Blob([PNG_1PX], { type: 'image/png' }), 'me2.jpg');
   const up = await api('POST', '/api/contractors/me/photo', undefined, contToken, f2);
   assert.equal(up.status, 201);
   const fname = up.data.photo_url.split('/').pop();
@@ -2277,7 +2277,7 @@ test('photo gate: a contractor without a photo cannot be offered a job', async (
   // once the photo is up, offering works and the offer carries an expiry
   const login = await api('POST', '/api/auth/login', { email: 'nophoto@test.local', password: 'Contractor123!' });
   const f = new FormData();
-  f.append('photo', new Blob([Buffer.from('np photo')], { type: 'image/jpeg' }), 'np.jpg');
+  f.append('photo', new Blob([PNG_1PX], { type: 'image/png' }), 'np.jpg');
   assert.equal((await api('POST', '/api/contractors/me/photo', undefined, login.data.token, f)).status, 201);
   const a2 = await api('POST', `/api/projects/${pid}/assign`, { contractor_id: crow.id }, adminToken);
   assert.equal(a2.status, 200);
@@ -2519,7 +2519,7 @@ async function makeEmployee(email, name = 'Own Tech') {
   assert.equal(lg.status, 200);
   // Profile photo: our assign gate requires one before ANY assignment (the customer sees who knocks).
   const pform = new FormData();
-  pform.append('photo', new Blob([Buffer.from('fake tech photo')], { type: 'image/jpeg' }), 'tech.jpg');
+  pform.append('photo', new Blob([PNG_1PX], { type: 'image/png' }), 'tech.jpg');
   assert.equal((await api('POST', '/api/contractors/me/photo', undefined, lg.data.token, pform)).status, 201);
   return { id: r.data.id, token: lg.data.token };
 }
@@ -2617,7 +2617,7 @@ test('REGRESSION: converting between company technician and contractor — owner
   assert.equal((await api('PATCH', `/api/contractors/${cid}/verify`, { status: 'active' }, adminToken)).status, 200);
   // Profile photo: our assign gate requires one before ANY assignment.
   const cform = new FormData();
-  cform.append('photo', new Blob([Buffer.from('fake convert photo')], { type: 'image/jpeg' }), 'conv.jpg');
+  cform.append('photo', new Blob([PNG_1PX], { type: 'image/png' }), 'conv.jpg');
   assert.equal((await api('POST', '/api/contractors/me/photo', undefined, ctok, cform)).status, 201);
   const fp = await freshProject();
   assert.equal((await api('POST', `/api/projects/${fp.projectId}/assign`, { contractor_id: cid }, adminToken)).status, 200);

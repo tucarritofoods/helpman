@@ -6,6 +6,13 @@ const { ah, authRequired, requireRole, isInt, failIfErrors } = require('../middl
 const { touchInteraction } = require('../services/crm');
 const { notify, shell } = require('../services/notify');
 const { auditLog } = require('../services/audit');
+const views = require('../services/views');
+
+// Staff without the 'costs' permission and customers never see what Helpman pays the pro.
+function quoteView(req, q) {
+  if (req.user.role === 'admin' && can(req.user, 'costs')) return q;
+  return views.quoteForCustomer(q);
+}
 
 const router = express.Router();
 
@@ -108,7 +115,7 @@ router.get('/', authRequired, ah(async (req, res) => {
   const job = await db.prepare('SELECT * FROM job_requests WHERE id = ?').get(job_request_id);
   if (!job) return res.status(404).json({ error: 'Job request not found.' });
   if (!jobVisibleTo(req, job)) return res.status(403).json({ error: 'Not allowed.' });
-  res.json(await db.prepare('SELECT * FROM quotes WHERE job_request_id = ? ORDER BY id DESC').all(job.id));
+  res.json((await db.prepare('SELECT * FROM quotes WHERE job_request_id = ? ORDER BY id DESC').all(job.id)).map(q => quoteView(req, q)));
 }));
 
 // ---- Read a quote (owner customer or admin) ----
@@ -117,7 +124,7 @@ router.get('/:id', authRequired, ah(async (req, res) => {
   if (!q) return res.status(404).json({ error: 'Quote not found.' });
   const job = await db.prepare('SELECT * FROM job_requests WHERE id = ?').get(q.job_request_id);
   if (!jobVisibleTo(req, job)) return res.status(403).json({ error: 'Not allowed.' });
-  res.json(q);
+  res.json(quoteView(req, q));
 }));
 
 // ---- Customer: accept / reject. Accepting requires Terms acceptance and

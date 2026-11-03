@@ -207,14 +207,14 @@
             <form><div class="field"><label>What happened today?</label><textarea name="summary" maxlength="2000" required></textarea></div>
             <div class="form-grid two"><div class="field"><label>Hours worked</label><input type="number" min="0" max="24" step=".25" name="hours_worked"></div>
             <div class="field"><label>Blockers / issues</label><input name="blockers" maxlength="1500"></div></div>
-            <label class="small"><input type="checkbox" name="customer_visible"> Share this update with the customer</label>
+            <span class="small muted">Daily updates go to Helpman support, who keeps the customer informed.</span>
             <div><button class="btn btn-outline btn-sm">Save daily log</button></div></form>`;
           body.appendChild(sec);
           sec.querySelector('form').onsubmit=async e=>{
             e.preventDefault();const f=e.target;
             await HP.api('POST',`/contractor-ops/projects/${pid}/daily-log`,{
               summary:f.summary.value,hours_worked:f.hours_worked.value||null,blockers:f.blockers.value,
-              customer_visible:f.customer_visible.checked
+              customer_visible:false
             });
             HP.toast('Daily log saved.','ok'); f.reset();
           };

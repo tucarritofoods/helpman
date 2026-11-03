@@ -34,6 +34,7 @@
       <button class="tab" data-tab="reports" role="tab">Reports</button>
       <button class="tab" data-tab="team" role="tab">Team</button>
       <button class="tab" data-tab="security" role="tab">Security</button>
+      <button class="tab" data-tab="plugs" role="tab">Setup</button>
     </div>
 
     <section class="tab-panel active" id="panel-overview" role="tabpanel">
@@ -225,6 +226,15 @@
       </div>
     </section>
 
+    <section class="tab-panel" id="panel-plugs" role="tabpanel">
+      <div class="section">
+        <div class="section-head"><h2>Setup — owner plug-ins</h2>
+          <button class="btn btn-outline btn-sm" type="button" id="plugs-refresh">Check again</button></div>
+        <p class="small muted">Everything in Helpman is built. What is left is what only the owner can plug in: accounts, keys and a paid hosting plan. Green means plugged in; the live tests use harmless calls (no charge, no customer email).</p>
+        <div id="plugs-body"><p class="muted">Loading…</p></div>
+      </div>
+    </section>
+
     <section class="tab-panel" id="panel-team" role="tabpanel">
       <div class="section">
         <div class="section-head"><h2>Team</h2></div>
@@ -308,6 +318,7 @@
   <script src="js/pwa-v6.js" defer></script>
   <script src="js/admin-v5.js" defer></script>
   <script src="js/admin-v4.js" defer></script>
+  <script src="js/plugs-v1.js" defer></script>
   <script>
   // Helpman — admin dashboard.
   (function () {
@@ -324,9 +335,9 @@
     document.querySelectorAll('#admin-tabs .tab').forEach((t) => {
       t.addEventListener('click', () => {
         document.querySelectorAll('#admin-tabs .tab').forEach((x) => x.classList.toggle('active', x === t));
-        document.querySelectorAll('#panel-overview, #panel-kpis, #panel-clients, #panel-contractors, #panel-projects, #panel-agenda, #panel-payouts, #panel-collections, #panel-disputes, #panel-messages, #panel-campaigns, #panel-reports, #panel-team, #panel-security')
+        document.querySelectorAll('#panel-overview, #panel-kpis, #panel-clients, #panel-contractors, #panel-projects, #panel-agenda, #panel-payouts, #panel-collections, #panel-disputes, #panel-messages, #panel-campaigns, #panel-reports, #panel-team, #panel-security, #panel-plugs')
           .forEach((p) => p.classList.toggle('active', p.id === 'panel-' + t.dataset.tab));
-        const fn = { overview: loadOverview, kpis: loadKpis, clients: loadClients, contractors: loadContractorTab, projects: loadProjectsTab, agenda: loadAgendaTab, payouts: loadPayoutsTab, collections: loadCollectionsTab, disputes: loadDisputesTab, messages: loadMessagesTab, campaigns: loadCampaignsTab, reports: loadReports, team: loadTeam, security: loadSecurity }[t.dataset.tab];
+        const fn = { overview: loadOverview, kpis: loadKpis, clients: loadClients, contractors: loadContractorTab, projects: loadProjectsTab, agenda: loadAgendaTab, payouts: loadPayoutsTab, collections: loadCollectionsTab, disputes: loadDisputesTab, messages: loadMessagesTab, campaigns: loadCampaignsTab, reports: loadReports, team: loadTeam, security: loadSecurity, plugs: () => window.loadPlugsTab && window.loadPlugsTab() }[t.dataset.tab];
         if (fn) fn();
       });
     });
@@ -858,7 +869,7 @@
       if (!me) return;
       window.__perms = me.permissions || [];
       const TAB_AREA = { overview: 'finance', kpis: 'finance', clients: 'support', contractors: 'dispatch', projects: 'read', agenda: 'read', disputes: 'read',
-        payouts: 'finance', collections: 'finance', messages: 'support', campaigns: 'marketing', reports: 'finance', team: 'staff' };
+        payouts: 'finance', collections: 'finance', messages: 'support', campaigns: 'marketing', reports: 'finance', team: 'staff', plugs: 'staff' };
       let first = null;
       document.querySelectorAll('#admin-tabs .tab').forEach((t) => {
         const need = TAB_AREA[t.dataset.tab];

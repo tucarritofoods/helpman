@@ -19,7 +19,6 @@ requireProductionSecrets();
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
-if (process.env.NODE_ENV === 'production') app.set('trust proxy', 1);
 
 // Optional error reporting. Enable with: npm i @sentry/node  +  SENTRY_DSN=...
 // Without the package or the DSN this does nothing.
@@ -121,6 +120,12 @@ app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// ---- Golden rule safety net (Corte 1) ----
+// Every JSON response to a customer or a contractor is filtered: the other side's
+// contact details and money, and any secret or capability token, are removed
+// even if a route forgets to serialize. See src/services/views.js.
+app.use(require('./src/services/views').responseGuard);
+
 // ---- Rate limiting (PRO 100%): abuse protection on public endpoints ----
 // Auth endpoints: 20 attempts / 15 min per IP. Job intake: 30 / hour per IP.
 const authLimiter = rateLimit({
@@ -164,7 +169,7 @@ app.get('/api/photos/:filename', async (req, res) => {
       const url = await storage.signedReadUrl(row.storage_key, 300);
       return res.redirect(302, url);
     }
-    const abs = path.join(__dirname, 'uploads', row.filename);
+    const abs = require('./src/services/paths').uploadPath(row.filename);
     if (!fs.existsSync(abs)) return res.status(404).json({ error: 'Photo file missing.' });
     res.type(row.mime || 'image/jpeg');
     res.set('Cache-Control', 'private, max-age=3600');
@@ -191,7 +196,7 @@ app.get('/api/contractor-photos/:filename', async (req, res) => {
       const url = await storage.signedReadUrl(fname, 300);
       return res.redirect(302, url);
     }
-    const abs = path.join(__dirname, 'uploads', path.basename(fname));
+    const abs = require('./src/services/paths').uploadPath(fname);
     if (!fs.existsSync(abs)) return res.status(404).json({ error: 'Photo file missing.' });
     res.type('image/jpeg');
     res.set('Cache-Control', 'private, max-age=3600');
@@ -266,6 +271,7 @@ app.use('/api/sms', require('./src/routes/sms'));
 app.use('/api/ai', require('./src/routes/ai'));
 app.use('/api/disputes', require('./src/routes/disputes'));
 app.use('/api/staff', require('./src/routes/staff'));
+app.use('/api/admin/plugs', require('./src/routes/plugs'));
 app.use('/api/me', require('./src/routes/privacy'));
 app.use('/api', require('./src/routes/offers'));
 app.use('/api/email', require('./src/routes/emailEvents'));

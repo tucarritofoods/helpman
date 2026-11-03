@@ -45,7 +45,8 @@ router.get('/', authRequired, ah(async (req, res) => {
   if (req.user.role === 'contractor') {
     const c = await db.prepare('SELECT id FROM contractors WHERE user_id = ?').get(req.user.id);
     if (!c) return res.json([]);
-    return res.json(await db.prepare('SELECT id, project_id, rating, comment, created_at FROM reviews WHERE contractor_id = ? ORDER BY id DESC LIMIT 500').all(c.id));
+    const { reviewForContractor } = require('../services/views');
+    return res.json((await db.prepare('SELECT id, project_id, rating, comment, created_at FROM reviews WHERE contractor_id = ? ORDER BY id DESC LIMIT 500').all(c.id)).map(reviewForContractor));
   }
   const { contractor_id } = req.query;
   const rows = contractor_id

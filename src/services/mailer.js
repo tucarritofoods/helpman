@@ -4,15 +4,20 @@
 // SENDER IDENTITY (owner-confirmed): every email the platform sends comes from
 // the BUSINESS account, never a personal one.
 //
-//   HANDYMAN_FROM_EMAIL  (default: "generalhandymans@gmail.com" — the real business address)
-//   HANDYMAN_FROM_NAME   (default: "Helpman")
+//   HANDYMAN_FROM_EMAIL  (default: "hola@helpman.app" — an address on the Helpman
+//                         domain; a free mailbox such as @gmail.com cannot be
+//                         authenticated with SPF/DKIM and lands in spam)
+//   HANDYMAN_FROM_NAME   (default: "Helpman by Mendoza Capital LLC")
 //
 // Real delivery additionally requires a provider: EMAIL_PROVIDER=sendgrid plus
 // SENDGRID_API_KEY (or another SMTP setup). Default is "console" log mode,
 // which records every message in the email_log table without sending anything.
 // See README ("Business email setup") before sending real mail.
-const FROM_EMAIL = process.env.HANDYMAN_FROM_EMAIL || process.env.EMAIL_FROM || 'generalhandymans@gmail.com';
-const FROM_NAME = process.env.HANDYMAN_FROM_NAME || 'Helpman';
+const FROM_EMAIL = process.env.HANDYMAN_FROM_EMAIL || process.env.EMAIL_FROM || 'hola@helpman.app';
+const FROM_NAME = process.env.HANDYMAN_FROM_NAME || 'Helpman by Mendoza Capital LLC';
+const FREE_MAILBOX = /@(gmail|googlemail|yahoo|hotmail|outlook|live|aol|icloud|me|proton(mail)?)\./i;
+// True when the sender can be authenticated (own domain, not a free mailbox).
+const senderIsAuthenticatable = () => !FREE_MAILBOX.test(FROM_EMAIL);
 
 // Providers:
 //  - "console" (default): prints to server console AND returns ok:true.
@@ -59,4 +64,4 @@ async function sendViaSendGrid({ to, subject, html, headers }) {
   return { ok: false, provider: 'sendgrid', error: `SendGrid ${res.status}: ${err.slice(0, 200)}` };
 }
 
-module.exports = { send, activeProvider, FROM_EMAIL, FROM_NAME };
+module.exports = { send, activeProvider, FROM_EMAIL, FROM_NAME, senderIsAuthenticatable };

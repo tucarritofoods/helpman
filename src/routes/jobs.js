@@ -17,8 +17,7 @@ const router = express.Router();
 // Public intake routes serve guests (claim token) AND logged-in users.
 router.use(optionalAuth);
 
-const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads');
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+const { UPLOAD_DIR } = require('../services/paths');
 
 const upload = multer({
   dest: UPLOAD_DIR,
@@ -136,6 +135,8 @@ router.post('/:id/photos', preflightJob, upload.array('photos', 6), ah(async (re
     return res.status(409).json({ error: `A request can have up to ${MAX_REQUEST_PHOTOS} photos (${req.photosHave} already attached).` });
   }
 
+  // Every file must be a real image before anything is analyzed or stored.
+  await require('../services/photostore').assertImages(req.files);
   const analyzed = await vision.analyzePhotos(req.files.map(f => ({
     path: f.path, mime: f.mimetype, filename: f.filename, originalName: f.originalname,
   })));
@@ -147,7 +148,7 @@ router.post('/:id/photos', preflightJob, upload.array('photos', 6), ah(async (re
     const info = await db.prepare(
       `INSERT INTO photos (job_request_id, filename, original_name, mime, size_bytes, width, height, kind, vision_json, uploaded_by, storage_key, storage_provider)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
-    ).run(job.id, filename, f.originalname, f.mimetype, opt.size, opt.width, opt.height, 'request',
+    ).run(job.id, filename, require('../services/photostore').safeOriginalName(f.originalname), f.mimetype, opt.size, opt.width, opt.height, 'request',
       JSON.stringify(analyzed), req.user ? req.user.id : null, storageKey, storageProvider);
     saved.push(await db.prepare('SELECT * FROM photos WHERE id = ?').get(info.lastInsertRowid));
   }

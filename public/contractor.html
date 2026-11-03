@@ -411,19 +411,32 @@
       const photos = (p.photos && p.photos.length)
         ? `<div class="photo-grid">${p.photos.map(photoTile).join('')}</div>`
         : '<p class="small muted">No photos uploaded yet.</p>';
+      const j = p.job || {};
+      const where = j.address
+        ? HP.esc([j.address, j.city, j.zip].filter(Boolean).join(', '))
+        : `${HP.esc([j.city, j.zip].filter(Boolean).join(' ') || '—')}<br><span class="small muted">${HP.esc(j.address_note || '')}</span>`;
+      const when = p.scheduled_start
+        ? `${HP.esc(HP.fmtDate(p.scheduled_start))}${p.arrival_window ? ' · ' + HP.esc(p.arrival_window) : ''}`
+        : 'To be confirmed by Helpman';
       body.innerHTML = `
         ${offerBox}
         <dl class="kv">
+          <dt>Service</dt><dd>${HP.esc(j.service_type || '—')}${j.urgency === 'urgent' ? ' ' + HP.badge('Urgent', 'warn') : ''}</dd>
+          <dt>Customer</dt><dd>${HP.esc(j.customer_first_name || '—')}</dd>
+          <dt>Where</dt><dd>${where}</dd>
+          <dt>When</dt><dd>${when}</dd>
           <dt>Your payout</dt><dd><strong>${HP.fmtMoney(p.contractor_cost_cents)}</strong></dd>
           <dt>Current stage</dt><dd>${HP.esc(HP.PROJECT_STAGE[p.stage] || p.stage)}</dd>
         </dl>
+        ${j.description ? `<h4>What the customer asked for</h4><p class="small" style="white-space:pre-line">${HP.esc(j.description)}</p>` : ''}
+        <div class="banner banner-info" style="margin:.75rem 0"><strong>Helpman rule:</strong> all contact with the customer goes through Helpman support (Messages below). Never share or ask for phone numbers, emails or social accounts — that is grounds for removal from the platform.</div>
         ${(!offered && ['scheduled', 'in_progress'].includes(p.stage)) ? `<h4>Visit day</h4>
         <div class="btn-row" style="margin-top:.4rem">
           <button class="btn btn-primary btn-sm" data-otw="${p.id}" type="button">🚗 I'm on my way</button>
           <button class="btn btn-outline btn-sm" data-outcome="completed" data-pid="${p.id}" type="button">Visit done</button>
           <button class="btn btn-outline btn-sm" data-outcome="customer_no_show" data-pid="${p.id}" type="button">Customer wasn't there</button>
         </div>
-        <p class="small muted">"On my way" texts the customer (only if they opted in). They never see your phone number.</p>` : ''}
+        <p class="small muted">"On my way" notifies the customer from the Helpman number (only if they opted in). They never see your phone number.</p>` : ''}
         <h4>Move this job</h4>
         <div class="btn-row" style="margin-top:.4rem">${stageBtns || '<span class="small muted">No further moves available for your role.</span>'}</div>
         <hr class="divider">

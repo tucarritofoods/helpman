@@ -11,7 +11,7 @@ const { auditLog } = require('../services/audit');
 
 const router = express.Router();
 
-const DOC_DIR = path.join(__dirname, '..', '..', 'uploads', 'contractor-docs');
+const { DOC_DIR } = require('../services/paths');
 fs.mkdirSync(DOC_DIR, { recursive: true });
 
 const upload = multer({
@@ -185,7 +185,7 @@ router.post('/projects/:id/daily-log', authRequired, requireRole('contractor'), 
     (project_id,contractor_id,work_date,summary,hours_worked,blockers,customer_visible)
     VALUES(?,?,?,?,?,?,?)`)
     .run(p.id,c.id,b.work_date||new Date().toISOString().slice(0,10),b.summary.trim(),hours,
-      String(b.blockers||'').trim().slice(0,1500)||null,b.customer_visible?1:0);
+      String(b.blockers||'').trim().slice(0,1500)||null,0); // golden rule: logs go to Helpman support, never straight to the customer
   res.status(201).json(await db.prepare('SELECT * FROM contractor_daily_logs WHERE id=?').get(info.lastInsertRowid));
 }));
 

@@ -18,7 +18,7 @@
 </head>
 <body>
 <main class="offer-wrap">
-  <img class="offer-logo" src="img/logo-header.jpg" alt="Helpman by Mendoza Capital LLC">
+  <img class="offer-logo" src="img/helpman-logo-primary.png" alt="Helpman by Mendoza Capital LLC">
   <div id="app"><div class="card"><p class="muted">Loading…</p></div></div>
 </main>
 <script src="js/api.js"></script>
@@ -52,7 +52,7 @@
       <h2 style="margin-top:0;color:var(--navy)">Job offer — ${esc(s.service_type)} <span class="muted">#${s.project_id}</span></h2>
       <p>Hi <strong>${first}</strong>, Helpman by Mendoza Capital LLC is offering you this project:</p>
       <dl class="kv">
-        <dt>Address</dt><dd>${esc(s.address || '—')}</dd>
+        <dt>Area</dt><dd>${esc(s.address || '—')}<br><span class="small muted">The exact address is shared once you accept.</span></dd>
         <dt>Details</dt><dd>${esc(s.description || '—')}</dd>
       </dl>
       <p class="offer-meta">This offer expires ${esc((s.expires_at || '').slice(0, 16).replace('T', ' '))}.</p>

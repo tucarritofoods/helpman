@@ -14,7 +14,7 @@ const { notify, shell } = require('../services/notify');
 const router = express.Router();
 
 const photoUpload = multer({
-  dest: path.join(__dirname, '..', '..', 'uploads'),
+  dest: require('../services/paths').UPLOAD_DIR,
   limits: { fileSize: 5 * 1024 * 1024, files: 1 },
   fileFilter: (req, file, cb) => {
     if (file.mimetype && file.mimetype.startsWith('image/')) cb(null, true);
@@ -146,7 +146,10 @@ router.patch('/:id/provider-type', authRequired, requireStaff('staff'), ah(async
 // can be offered. The contractor is told this in the portal and by email.
 router.post('/me/photo', authRequired, requireRole('contractor'), photoUpload.single('photo'), ah(async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Send the photo as the "photo" file field.' });
-  const { filename } = await require('../services/photostore').persist(req.file, 'profile');
+  const photostore = require('../services/photostore');
+  // A real image only; re-encoding strips EXIF/GPS (the photo is shown to customers).
+  await photostore.assertImages([req.file]);
+  const { filename } = await photostore.persist(req.file, 'profile');
   await db.prepare('UPDATE contractors SET photo_filename = ? WHERE user_id = ?').run(filename, req.user.id);
   await auditLog(req.user.id, 'contractor.photo_uploaded', 'contractors', req.user.id, 'Profile photo updated');
   const { contractorPhotoUrl } = require('../services/notify');

@@ -5,6 +5,7 @@ const db = require('../db');
 const { ah, authRequired, requireRole, isNonEmpty, failIfErrors } = require('../middleware');
 const { auditLog } = require('../services/audit');
 const { notify, shell } = require('../services/notify');
+const views = require('../services/views');
 
 const router = express.Router();
 
@@ -88,7 +89,11 @@ router.put('/projects/:id/schedule-preference', authRequired, requireRole('custo
 
 router.get('/projects/:id/change-orders', authRequired, ah(async (req, res) => {
   const p = await loadVisibleProject(req, res); if (!p) return;
-  const rows = await db.prepare('SELECT * FROM change_orders WHERE project_id = ? ORDER BY id DESC').all(p.id);
+  let rows = await db.prepare('SELECT * FROM change_orders WHERE project_id = ? ORDER BY id DESC').all(p.id);
+  // The customer only sees changes Helpman has SENT them (drafts are internal);
+  // the contractor never sees the customer price change.
+  if (req.user.role === 'customer') rows = rows.filter(r => r.status !== 'draft' && r.status !== 'cancelled');
+  if (req.user.role === 'contractor') rows = rows.map(views.changeOrderForContractor);
   res.json(rows);
 }));
 
@@ -103,26 +108,51 @@ router.post('/projects/:id/change-orders', authRequired, ah(async (req, res) => 
   if (!Number.isInteger(Number(b.schedule_delta_days || 0))) errors.schedule_delta_days = 'Invalid schedule change.';
   if (failIfErrors(res, errors)) return;
 
+  // A contractor PROPOSES scope/schedule; the customer price change is set by
+  // Helpman staff before the change is sent (golden rule: the pro never prices
+  // or writes to the customer directly).
+  const isContractor = req.user.role === 'contractor';
   const info = await db.prepare(`INSERT INTO change_orders
     (project_id,title,description,reason,price_delta_cents,schedule_delta_days,status,created_by)
     VALUES (?,?,?,?,?,?,?,?)`)
     .run(p.id, b.title.trim(), b.description.trim(), (b.reason || '').trim() || null,
-      Number(b.price_delta_cents || 0), Number(b.schedule_delta_days || 0), 'draft', req.user.id);
+      isContractor ? 0 : Number(b.price_delta_cents || 0), Number(b.schedule_delta_days || 0), 'draft', req.user.id);
 
-  await addEvent(p.id, 'change_order_created', 'Change order drafted', b.title.trim(), req.user.role);
-  auditLog(req.user.id, 'change_order.created', 'change_orders', info.lastInsertRowid, `Project #${p.id}`);
-  res.status(201).json(await db.prepare('SELECT * FROM change_orders WHERE id = ?').get(info.lastInsertRowid));
+  // Drafts are internal: nothing reaches the customer's timeline until staff send it.
+  auditLog(req.user.id, 'change_order.created', 'change_orders', info.lastInsertRowid, `Project #${p.id}${isContractor ? ' (proposed by contractor)' : ''}`);
+  if (isContractor) {
+    const admins = await db.prepare("SELECT email FROM users WHERE role = 'admin' AND (staff_role IS NULL OR staff_role <> 'disabled')").all();
+    for (const a of admins) {
+      await notify({
+        to: a.email,
+        subject: `Change proposed by the pro — project #${p.id}`,
+        html: shell('A contractor proposed a project change', 'Review it, set the customer price change and send it from the admin panel:',
+          [['Project', `#${p.id}`], ['Change', b.title.trim()]]),
+      }).catch(() => {});
+    }
+  }
+  const created = await db.prepare('SELECT * FROM change_orders WHERE id = ?').get(info.lastInsertRowid);
+  res.status(201).json(isContractor ? views.changeOrderForContractor(created) : created);
 }));
 
 router.post('/projects/:id/change-orders/:cid/send', authRequired, ah(async (req, res) => {
   const p = await loadVisibleProject(req, res); if (!p) return;
-  if (!['admin','contractor'].includes(req.user.role)) return res.status(403).json({ error: 'Not allowed.' });
+  // Only Helpman staff talk to the customer about a change (golden rule).
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Helpman support reviews and sends every project change.' });
   const co = await db.prepare('SELECT * FROM change_orders WHERE id = ? AND project_id = ?').get(req.params.cid, p.id);
   if (!co) return res.status(404).json({ error: 'Change order not found.' });
   if (!['draft','rejected'].includes(co.status)) return res.status(409).json({ error: 'Only draft/rejected change orders can be sent.' });
 
-  await db.prepare(`UPDATE change_orders SET status='sent', sent_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(co.id);
-  await addEvent(p.id, 'change_order_sent', 'Change order needs approval', co.title, req.user.role);
+  // Staff may adjust the customer price change while sending (whole cents).
+  const b = req.body || {};
+  if (b.price_delta_cents !== undefined && !Number.isInteger(Number(b.price_delta_cents))) {
+    return res.status(422).json({ errors: { price_delta_cents: 'Invalid price change.' } });
+  }
+  const title = views.redactContacts(co.title);
+  const description = views.redactContacts(co.description);
+  await db.prepare(`UPDATE change_orders SET status='sent', title=?, description=?, price_delta_cents=?, sent_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+    .run(title, description, b.price_delta_cents !== undefined ? Number(b.price_delta_cents) : co.price_delta_cents, co.id);
+  await addEvent(p.id, 'change_order_sent', 'Change order needs approval', title, 'admin');
 
   const job = await db.prepare('SELECT * FROM job_requests WHERE id = ?').get(p.job_request_id);
   const email = job.customer_id
@@ -134,7 +164,7 @@ router.post('/projects/:id/change-orders/:cid/send', authRequired, ah(async (req
       subject: `Action needed: project change #${p.id}`,
       html: shell('Project change needs your approval',
         'A change to your project has been documented in Helpman. Please review it in your customer portal before work proceeds on the changed scope.',
-        [['Project', `#${p.id}`], ['Change', co.title]])
+        [['Project', `#${p.id}`], ['Change', title]])
     }).catch(() => {});
   }
   res.json(await db.prepare('SELECT * FROM change_orders WHERE id = ?').get(co.id));

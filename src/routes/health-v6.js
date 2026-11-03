@@ -3,6 +3,8 @@
 const express = require('express');
 const db = require('../db');
 const { readiness } = require('../services/health');
+const { authRequired } = require('../middleware');
+const { requireStaff } = require('../services/permissions');
 
 const router = express.Router();
 
@@ -21,7 +23,8 @@ router.get('/ready', async (req,res)=>{
   res.status(out.ok?200:503).json(out);
 });
 
-router.get('/metrics-summary', async (req,res)=>{
+// Business counts are not public information: staff only.
+router.get('/metrics-summary', authRequired, requireStaff('read'), async (req,res)=>{
   try{
     const [jobs,projects,failedPayments] = await Promise.all([
       db.prepare(`SELECT COUNT(*) c FROM job_requests`).get(),

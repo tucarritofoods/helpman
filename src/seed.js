@@ -126,7 +126,7 @@ for (const [ci, service, urgency, state, city, status, daysAgo, scope, desc] of 
 // Photos on a couple of jobs (1x1 png stand-ins).
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 const fs = require('fs'), path = require('path');
-const upDir = path.join(__dirname, '..', 'uploads');
+const upDir = require('./services/paths').UPLOAD_DIR;
 fs.mkdirSync(upDir, { recursive: true });
 for (const jid of [jobs[7].id, jobs[8].id]) {
   const fn = `seed-${jid}-1.png`;

@@ -126,7 +126,7 @@ router.post('/delete', ah(async (req, res) => {
   for (const p of doomed) {
     try {
       if (p.storage_provider === 's3' && p.storage_key && storage.isConfigured()) await storage.deleteObject(p.storage_key);
-      else require('fs').unlinkSync(require('path').join(__dirname, '..', '..', 'uploads', p.filename));
+      else require('fs').unlinkSync(require('../services/paths').uploadPath(p.filename));
     } catch (e) { /* already gone */ }
   }
   await unsub.suppress(oldEmail, 'account deleted'); // never market to a deleted account
