@@ -6,6 +6,10 @@ const db = require('../db');
 const mailer = require('./mailer');
 const BRAND = process.env.BRAND_NAME || 'Helpman';
 
+// Greeting name: first word only, no stray spaces ("Hi Ana ," / "Hi ," came
+// from names saved with leading/trailing spaces). Falls back to "there".
+function greetName(n) { return String(n || '').trim().split(/\s+/)[0] || 'there'; }
+
 async function logEmail(to, subject, status, provider) {
   await db.prepare(
     'INSERT INTO email_log (outbox_id, to_email, subject, status, provider) VALUES (NULL,?,?,?,?)'
@@ -129,13 +133,13 @@ function techPhoto(photoUrl, size) {
 
 function welcomeCustomer(name) {
   return brandShell('Welcome to Helpman!',
-    `<p style="margin:0 0 12px;">Hi <strong>${esc(name)}</strong>, your account is ready.</p><p style="margin:0;">Request a service, get a fixed quote, and track everything from your portal &mdash; a verified pro, <strong>with photo</strong>, is assigned to every job.</p>`,
+    `<p style="margin:0 0 12px;">Hi <strong>${esc(greetName(name))}</strong>, your account is ready.</p><p style="margin:0;">Request a service, get a fixed quote, and track everything from your portal &mdash; a verified pro, <strong>with photo</strong>, is assigned to every job.</p>`,
     btn(`${baseUrl()}/customer.html`, 'Go to my portal'));
 }
 
 function welcomeContractor(name) {
   return brandShell('Welcome aboard, pro!',
-    `<p style="margin:0 0 12px;">Hi <strong>${esc(name)}</strong>, your contractor account is created and pending verification.</p><p style="margin:0;">One important step: <strong>upload your profile photo</strong> &mdash; customers see the photo of the technician assigned to their job, and we cannot offer you work until your photo is on file.</p>`,
+    `<p style="margin:0 0 12px;">Hi <strong>${esc(greetName(name))}</strong>, your contractor account is created and pending verification.</p><p style="margin:0;">One important step: <strong>upload your profile photo</strong> &mdash; customers see the photo of the technician assigned to their job, and we cannot offer you work until your photo is on file.</p>`,
     btn(`${baseUrl()}/contractor.html`, 'Complete my profile'));
 }
 
@@ -143,20 +147,20 @@ function welcomeContractor(name) {
 // since the form has no upload yet) — and re-sendable by dispatch.
 function photoReminder(name) {
   return brandShell('One step left: upload your profile photo',
-    `<p style="margin:0 0 12px;">Hi <strong>${esc(name)}</strong>, when we assign you a job the customer receives your <strong>name and your photo</strong> &mdash; that is how they know who is knocking on their door.</p><p style="margin:0;"><strong>Please upload your profile photo from your contractor portal.</strong> Until your photo is on file we cannot assign you any work.</p>`,
+    `<p style="margin:0 0 12px;">Hi <strong>${esc(greetName(name))}</strong>, when we assign you a job the customer receives your <strong>name and your photo</strong> &mdash; that is how they know who is knocking on their door.</p><p style="margin:0;"><strong>Please upload your profile photo from your contractor portal.</strong> Until your photo is on file we cannot assign you any work.</p>`,
     btn(`${baseUrl()}/contractor.html`, 'Upload my photo now', '#b7791f'));
 }
 
 function quoteAcceptedCustomer(name, projectId, serviceType) {
   return brandShell(`You&apos;ve accepted your proposal &mdash; project #${esc(String(projectId))}`,
-    `<p style="margin:0 0 12px;">Hi <strong>${esc(name)}</strong>, great news: your proposal for <strong>${esc(serviceType)}</strong> is accepted and your project is now in our hands.</p><p style="margin:0;"><strong>Next step:</strong> we assign a verified professional to your job. You will receive their <strong>name and photo</strong> by email as soon as they are assigned &mdash; phone numbers are never shared.</p>`,
+    `<p style="margin:0 0 12px;">Hi <strong>${esc(greetName(name))}</strong>, great news: your proposal for <strong>${esc(serviceType)}</strong> is accepted and your project is now in our hands.</p><p style="margin:0;"><strong>Next step:</strong> we assign a verified professional to your job. You will receive their <strong>name and photo</strong> by email as soon as they are assigned &mdash; phone numbers are never shared.</p>`,
     btn(`${baseUrl()}/customer.html`, 'Track my project'));
 }
 
 // The client-facing "your technician" email: photo + name, NO phone, NO email.
 function techAssignedCustomer({ customerName, techName, photoUrl, projectId, serviceType }) {
   return brandShell(`Your technician has been assigned &mdash; project #${esc(String(projectId))}`,
-    `<p style="margin:0;">Hi <strong>${esc(customerName)}</strong>, meet the professional doing your <strong>${esc(serviceType)}</strong> job:</p>`,
+    `<p style="margin:0;">Hi <strong>${esc(greetName(customerName))}</strong>, meet the professional doing your <strong>${esc(serviceType)}</strong> job:</p>`,
     `${techPhoto(photoUrl, 150)}<p style="text-align:center;font-size:19px;margin:10px 0 4px;color:#143d7a;"><strong>${esc(techName)}</strong></p>
     <p style="text-align:center;color:#8a97a5;font-size:13px;margin:0 0 8px;">Verified pro &middot; photo on file</p>
     <p style="color:#5b6b7e;font-size:14px;line-height:1.65;">You will receive the confirmed day and arrival window in a separate email. For your privacy and theirs, <strong>we never share phone numbers</strong> &mdash; message us from your portal any time.</p>`
@@ -166,7 +170,7 @@ function techAssignedCustomer({ customerName, techName, photoUrl, projectId, ser
 // Job-offer email to the contractor with one-click accept / decline.
 function jobOfferContractor({ name, projectId, serviceType, address, budget, acceptUrl, declineUrl, expiresNote }) {
   return brandShell(`New job offer &mdash; ${esc(serviceType)} (#${esc(String(projectId))})`,
-    `<p style="margin:0;">Hi <strong>${esc(name)}</strong>, Helpman by Mendoza Capital LLC is offering you a project.${expiresNote ? ` <strong>${esc(expiresNote)}</strong>` : ''}</p>`,
+    `<p style="margin:0;">Hi <strong>${esc(greetName(name))}</strong>, Helpman by Mendoza Capital LLC is offering you a project.${expiresNote ? ` <strong>${esc(expiresNote)}</strong>` : ''}</p>`,
     `<table style="margin:16px 0;border-collapse:collapse;" cellpadding="0" cellspacing="0"><tbody>`
     + kvRow('Project', `#${esc(String(projectId))} &mdash; ${esc(serviceType)}`)
     + kvRow('Area', esc(address) + '<br><span style="font-weight:400;color:#8a97a5;font-size:12px;">Exact address shared once you accept.</span>')
@@ -182,14 +186,14 @@ function jobOfferContractor({ name, projectId, serviceType, address, budget, acc
 // After the contractor accepts the offer: waiting for the day to be confirmed.
 function offerAcceptedContractor(name, projectId, serviceType) {
   return brandShell(`Offer accepted &mdash; project #${esc(String(projectId))}`,
-    `<p style="margin:0 0 12px;">Hi <strong>${esc(name)}</strong>, you accepted the <strong>${esc(serviceType)}</strong> job.</p><p style="margin:0;">It is now <strong>waiting for the day to be confirmed</strong>. As soon as dispatch confirms the visit day you will receive another email with the date and arrival window, where you confirm or decline that slot.</p>`,
+    `<p style="margin:0 0 12px;">Hi <strong>${esc(greetName(name))}</strong>, you accepted the <strong>${esc(serviceType)}</strong> job.</p><p style="margin:0;">It is now <strong>waiting for the day to be confirmed</strong>. As soon as dispatch confirms the visit day you will receive another email with the date and arrival window, where you confirm or decline that slot.</p>`,
     '');
 }
 
 // Day + arrival window confirmed: contractor confirms or declines the slot.
 function scheduleConfirmedContractor({ name, projectId, day, window, acceptUrl, declineUrl, address }) {
   return brandShell(`Appointment confirmed &mdash; ${esc(prettyDay(day))} (#${esc(String(projectId))})`,
-    `<p style="margin:0;">Hi <strong>${esc(name)}</strong>, your appointment is confirmed for <strong>${esc(prettyDay(day))}</strong>${window ? `, arrival window <strong>${esc(window)}</strong>` : ''}.</p>`,
+    `<p style="margin:0;">Hi <strong>${esc(greetName(name))}</strong>, your appointment is confirmed for <strong>${esc(prettyDay(day))}</strong>${window ? `, arrival window <strong>${esc(window)}</strong>` : ''}.</p>`,
     (address ? `<table style="margin:14px 0;border-collapse:collapse;" cellpadding="0" cellspacing="0"><tbody>${kvRow('Address', esc(address))}</tbody></table>` : '')
     + `<p style="color:#5b6b7e;font-size:14px;line-height:1.65;">Please confirm you can make it, or decline so we can reassign in time. Questions about the job? Message Helpman support from your portal &mdash; never contact the customer directly.</p>
     <p style="text-align:center;margin:24px 0 8px;">
@@ -201,7 +205,7 @@ function scheduleConfirmedContractor({ name, projectId, day, window, acceptUrl, 
 // Customer version: technician photo + day + window + flexibility note.
 function scheduleConfirmedCustomer({ customerName, techName, photoUrl, projectId, day, window }) {
   return brandShell(`Your visit is scheduled &mdash; ${esc(prettyDay(day))} (#${esc(String(projectId))})`,
-    `<p style="margin:0;">Hi <strong>${esc(customerName)}</strong>, your visit is confirmed:</p>`,
+    `<p style="margin:0;">Hi <strong>${esc(greetName(customerName))}</strong>, your visit is confirmed:</p>`,
     `${techPhoto(photoUrl, 130)}
     <table style="margin:14px auto;border-collapse:collapse;" cellpadding="0" cellspacing="0"><tbody>`
     + kvRow('Technician', esc(techName))
@@ -230,7 +234,7 @@ function photoStrip(urls) {
 
 function dayBeforeReminderCustomer({ customerName, techName, photoUrl, projectId, serviceType, day, window }) {
   return brandShell(`See you tomorrow &mdash; project #${esc(String(projectId))}`,
-    `<p style="margin:0;">Hi <strong>${esc(customerName)}</strong>, a reminder that your <strong>${esc(serviceType)}</strong> visit is <strong>tomorrow, ${esc(prettyDay(day))}</strong>${window ? `, arrival window <strong>${esc(window)}</strong>` : ''}.</p>`,
+    `<p style="margin:0;">Hi <strong>${esc(greetName(customerName))}</strong>, a reminder that your <strong>${esc(serviceType)}</strong> visit is <strong>tomorrow, ${esc(prettyDay(day))}</strong>${window ? `, arrival window <strong>${esc(window)}</strong>` : ''}.</p>`,
     `${techPhoto(photoUrl, 110)}${techName ? `<p style="text-align:center;margin:6px 0 0;color:#143d7a;"><strong>${esc(techName)}</strong></p>` : ''}`
     + flexBox()
     + `<p style="color:#5b6b7e;font-size:14px;line-height:1.65;">Need to change something? Message us from your portal &mdash; please do it before the visit.</p>`
@@ -239,13 +243,13 @@ function dayBeforeReminderCustomer({ customerName, techName, photoUrl, projectId
 
 function onTheWayCustomer({ customerName, techName, photoUrl, projectId, serviceType }) {
   return brandShell(`Your pro is on the way &mdash; project #${esc(String(projectId))}`,
-    `<p style="margin:0;">Hi <strong>${esc(customerName)}</strong>, <strong>${esc(techName)}</strong> is on the way for your <strong>${esc(serviceType)}</strong> visit.</p>`,
+    `<p style="margin:0;">Hi <strong>${esc(greetName(customerName))}</strong>, <strong>${esc(techName)}</strong> is on the way for your <strong>${esc(serviceType)}</strong> visit.</p>`,
     `${techPhoto(photoUrl, 110)}<p style="color:#5b6b7e;font-size:14px;line-height:1.65;">Please make sure someone 18+ is home and the work area is accessible.</p>`);
 }
 
 function arrivedCustomer({ customerName, techName, photoUrl, projectId, serviceType }) {
   return brandShell(`Your pro has arrived &mdash; project #${esc(String(projectId))}`,
-    `<p style="margin:0;">Hi <strong>${esc(customerName)}</strong>, <strong>${esc(techName)}</strong> checked in at your home and is starting your <strong>${esc(serviceType)}</strong> job.</p>`,
+    `<p style="margin:0;">Hi <strong>${esc(greetName(customerName))}</strong>, <strong>${esc(techName)}</strong> checked in at your home and is starting your <strong>${esc(serviceType)}</strong> job.</p>`,
     `${techPhoto(photoUrl, 110)}<p style="color:#5b6b7e;font-size:14px;line-height:1.65;">Is this not the person in the photo? Do not let them in and message Helpman support right away from your portal.</p>`);
 }
 
@@ -256,7 +260,7 @@ function workFinishedCustomer({ customerName, techName, projectId, serviceType, 
       : `<p style="color:#5b6b7e;font-size:14px;line-height:1.65;">After you confirm, you can pay the remaining balance of <strong>${esc(money(balanceCents))}</strong> from your portal.</p>`)
     : '';
   return brandShell(`${reminder ? 'Reminder: ' : ''}Your job is finished &mdash; did everything go well?`,
-    `<p style="margin:0;">Hi <strong>${esc(customerName)}</strong>, <strong>${esc(techName)}</strong> finished your <strong>${esc(serviceType)}</strong> job (project #${esc(String(projectId))}). Here is the finished work:</p>`,
+    `<p style="margin:0;">Hi <strong>${esc(greetName(customerName))}</strong>, <strong>${esc(techName)}</strong> finished your <strong>${esc(serviceType)}</strong> job (project #${esc(String(projectId))}). Here is the finished work:</p>`,
     photoStrip(photoUrls) + pay
     + twoButtons(confirmUrl, 'Everything is fine — confirm & sign', problemUrl, 'Report a problem')
     + `<p style="color:#8a97a5;font-size:12.5px;line-height:1.6;">Confirming takes one minute from your phone. If something is not right, report it and Helpman support takes it from there &mdash; payments stay on hold until it is solved.</p>`);
@@ -265,18 +269,18 @@ function workFinishedCustomer({ customerName, techName, projectId, serviceType, 
 function receiptCustomer({ customerName, projectId, serviceType, lines, totalCents }) {
   const rows = (lines || []).map(([k, c]) => kvRow(k, esc(money(c)))).join('');
   return brandShell(`Receipt &mdash; project #${esc(String(projectId))} is paid in full`,
-    `<p style="margin:0;">Hi <strong>${esc(customerName)}</strong>, thank you! Your <strong>${esc(serviceType)}</strong> project is paid in full.</p>`,
+    `<p style="margin:0;">Hi <strong>${esc(greetName(customerName))}</strong>, thank you! Your <strong>${esc(serviceType)}</strong> project is paid in full.</p>`,
     `<table style="margin:16px 0;border-collapse:collapse;" cellpadding="0" cellspacing="0"><tbody>${rows}${kvRow('Total paid', esc(money(totalCents)))}</tbody></table>`
     + btn(`${baseUrl()}/customer.html`, 'See my project'));
 }
 
 function reviewRequestCustomer({ customerName, techName, projectId, reminder }) {
   return brandShell(reminder ? 'How did we do? (one minute)' : `Thanks for choosing Helpman &mdash; project #${esc(String(projectId))}`,
-    `<p style="margin:0;">Hi <strong>${esc(customerName)}</strong>, ${reminder ? 'we would love to hear' : 'your project is complete. Tell us'} how <strong>${esc(techName || 'your pro')}</strong> did &mdash; your review helps other neighbors and helps us keep the best pros.</p>`,
+    `<p style="margin:0;">Hi <strong>${esc(greetName(customerName))}</strong>, ${reminder ? 'we would love to hear' : 'your project is complete. Tell us'} how <strong>${esc(techName || 'your pro')}</strong> did &mdash; your review helps other neighbors and helps us keep the best pros.</p>`,
     btn(`${baseUrl()}/customer.html#review`, 'Leave a review'));
 }
 
-module.exports = { notify, shell, esc, projectParties,
+module.exports = { notify, shell, esc, projectParties, greetName,
   brandShell, welcomeCustomer, welcomeContractor, photoReminder,
   quoteAcceptedCustomer, techAssignedCustomer, jobOfferContractor,
   offerAcceptedContractor, scheduleConfirmedContractor, scheduleConfirmedCustomer,
@@ -296,7 +300,7 @@ async function depositConfirmationEmail(projectId) {
   await notify({
     to: customer.email,
     subject: `Deposit received — project #${project.id} ✓`,
-    html: shell('Deposit received ✓', `Hi ${(customer.name || '').split(' ')[0]}, your deposit is confirmed:`, [
+    html: shell('Deposit received ✓', `Hi ${greetName(customer.name || '')}, your deposit is confirmed:`, [
       ['Project', `#${project.id} — ${job.service_type}`],
       ['Amount paid', '$' + ((dep ? dep.amount_cents : project.expected_deposit) / 100).toFixed(2)],
       ['Method', dep && dep.provider === 'stripe' ? 'Card (Stripe)' : dep && dep.provider === 'simulated' ? 'Simulated (test)' : 'Manual'],
@@ -312,7 +316,7 @@ async function contractorAcceptanceEmail(projectId) {
   await notify({
     to: contractor.email,
     subject: `You accepted project #${project.id} ✓`,
-    html: shell('Job accepted ✓', `Hi ${contractor.name.split(' ')[0]}, you accepted this job under the Independent Contractor Terms:`, [
+    html: shell('Job accepted ✓', `Hi ${greetName(contractor.name)}, you accepted this job under the Independent Contractor Terms:`, [
       ['Project', `#${project.id} — ${job.service_type}`],
       ['Your payout', '$' + (project.contractor_cost_cents / 100).toFixed(2)],
       ['Independent Contractor Terms', `${SITE()}/contractor-terms.html`],
@@ -342,7 +346,7 @@ async function scheduleNotificationEmails(projectId) {
     await notify({
       to: contractor.email,
       subject: `Scheduled: project #${project.id} — ${project.scheduled_start}`,
-      html: shell('You are scheduled 📅', `Hi ${contractor.name.split(' ')[0]}, this job is scheduled:`, [
+      html: shell('You are scheduled 📅', `Hi ${greetName(contractor.name)}, this job is scheduled:`, [
         ['Project', `#${project.id} — ${job.service_type}`],
         ['Date', dates],
         ['Address', addr || '—'],
@@ -370,7 +374,7 @@ async function completionEmails(projectId) {
     await notify({
       to: contractor.email,
       subject: `Project #${project.id} closed — thanks!`,
-      html: shell('Job closed ✓', `Hi ${contractor.name.split(' ')[0]}, this job is marked complete:`, [
+      html: shell('Job closed ✓', `Hi ${greetName(contractor.name)}, this job is marked complete:`, [
         ['Project', `#${project.id} — ${job.service_type}`],
         ['Payout', '$' + (project.contractor_cost_cents / 100).toFixed(2)],
         ['Next step', 'Watch your portal for the next offer.'],

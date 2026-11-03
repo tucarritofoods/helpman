@@ -16,6 +16,7 @@
 // permission; everything else for 'support'. This module never decides access:
 // the routes do (src/routes/clients.js).
 'use strict';
+const { greetName } = require('./notify');
 const db = require('../db');
 const { auditLog } = require('./audit');
 const toDate = (v) => require('./kpis').toDate(v);
@@ -466,7 +467,7 @@ async function emailClient(id, { subject, body }, actor) {
   if (!b || b.length > 4000) errors.body = 'Write the message (max 4000 characters).';
   if (Object.keys(errors).length) throw Object.assign(err(422, 'Check the message.'), { errors });
   const { notify, brandShell, esc } = require('./notify');
-  const html = brandShell(esc(s), `<p style="margin:0 0 12px;">Hi ${esc(String(u.name).split(' ')[0])},</p>${esc(b).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px;">${p.replace(/\n/g, '<br>')}</p>`).join('')}<p style="margin:0;">— Helpman support</p>`);
+  const html = brandShell(esc(s), `<p style="margin:0 0 12px;">Hi ${esc(greetName(u.name))},</p>${esc(b).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px;">${p.replace(/\n/g, '<br>')}</p>`).join('')}<p style="margin:0;">— Helpman support</p>`);
   const r = await notify({ to: u.email, subject: s, html });
   const info = await db.prepare(`INSERT INTO customer_notes (customer_id, author_id, kind, subject, body) VALUES (?,?,'email',?,?)`).run(u.id, actor.id, s, b);
   await auditLog(actor.id, 'client.emailed', 'clients', u.id, s);
@@ -499,7 +500,7 @@ async function createRequest(id, b, actor) {
   await auditLog(actor.id, 'client.request_created', 'clients', u.id, `request #${jobId} — ${b.service_type}`);
   const { notify, shell } = require('./notify');
   await notify({ to: u.email, subject: `We created your request — #${jobId}`,
-    html: shell('Your request is in', `Hi ${String(u.name).split(' ')[0]}, as we talked, Helpman support created this request for you. We will send you a fixed quote soon; you can follow it from your portal.`,
+    html: shell('Your request is in', `Hi ${greetName(u.name)}, as we talked, Helpman support created this request for you. We will send you a fixed quote soon; you can follow it from your portal.`,
       [['Request', `#${jobId} — ${b.service_type}`], ['Address', [b.address, b.city, b.zip].filter(Boolean).join(', ')]]) }).catch(() => {});
   return db.prepare('SELECT * FROM job_requests WHERE id = ?').get(jobId);
 }
@@ -518,7 +519,7 @@ async function resendAccess(id, actor) {
   const link = `${base}/auth.html?reset=${token}`;
   const { notify, shell } = require('./notify');
   await notify({ to: u.email, subject: 'Your Helpman access link',
-    html: shell('Get back into your account', `Hi ${String(u.name).split(' ')[0]}, Helpman support sent you this link to set a new password and open your portal. It works for 1 hour.`, [['Link', link]])
+    html: shell('Get back into your account', `Hi ${greetName(u.name)}, Helpman support sent you this link to set a new password and open your portal. It works for 1 hour.`, [['Link', link]])
       + `<p style="text-align:center;margin:20px 0;"><a href="${link}" style="background:#143d7a;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Set my password</a></p>` }).catch(() => {});
   let verify = false;
   if (!u.email_verified) {

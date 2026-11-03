@@ -150,6 +150,12 @@ router.post('/:id/respond', authRequired, ah(async (req, res) => {
     return res.json({ accepted: false });
   }
 
+  // A1-20: accepting is the customer's own legal act (Terms + price + deposit).
+  // Staff can see the proposal and can mark it declined, but never accept it on
+  // the customer's behalf (the acceptance would be recorded under staff's id).
+  if (req.user.role !== 'customer') {
+    return res.status(403).json({ error: 'Only the customer can accept their proposal. Send them the link from Quotes.', code: 'CUSTOMER_ONLY' });
+  }
   // CRM: a blocked client cannot accept new work (declining is always allowed).
   if (req.user.role === 'customer' && await require('../services/clients').isBlocked({ userId: req.user.id, email: job.email })) {
     return res.status(403).json({ error: 'This account cannot accept quotes right now. Please contact Helpman support.', code: 'CLIENT_BLOCKED' });
@@ -240,6 +246,10 @@ router.post('/:id/respond', authRequired, ah(async (req, res) => {
       html: quoteAcceptedCustomer(String(custEmail.name || job.name || 'there').split(' ')[0], projectId, job.service_type),
     }).catch(() => {});
   }
+  // Corte 8: when the deposit is already in (dev bookkeeping path), offer the
+  // job automatically. With Stripe / pending deposits this happens when the
+  // money actually lands (webhook or Payments › record).
+  if (!stripeOn && devAutoRecord()) await require('../services/dispatch').autoOffer(projectId, { reason: 'deposit' });
   res.json({ accepted: true, project_id: projectId, stripe: { enabled: stripeOn }, deposit_pending: !stripeOn && !devAutoRecord() });
 }));
 

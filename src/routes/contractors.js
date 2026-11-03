@@ -1,3 +1,4 @@
+const { greetName } = require('../services/notify');
 // Contractors: profiles, verification workflow (admin), performance.
 const express = require('express');
 const multer = require('multer');
@@ -220,7 +221,7 @@ router.patch('/:id/verify', authRequired, requireStaff('dispatch'), ah(async (re
       await notify({
         to: u.email,
         subject: 'Your Helpman application is active ✓',
-        html: shell('You are active', `Hi ${u.name.split(' ')[0]}, your application was approved.`, [
+        html: shell('You are active', `Hi ${greetName(u.name)}, your application was approved.`, [
           ['Status', 'Active'],
           ['License', updated.license_exempt ? 'Exempt (minor work)' : (updated.license_verified ? 'Verified' : '—')],
           ['Next step', 'Watch for job offers in your portal — you can accept or propose a counter-offer.'],

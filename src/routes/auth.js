@@ -1,3 +1,4 @@
+const { greetName } = require('../services/notify');
 // Auth: DUAL signup flows (customer / contractor), one login, JWT sessions,
 // email verification + password recovery (tokens, expiring).
 const express = require('express');
@@ -23,7 +24,7 @@ async function sendVerificationEmail(user, token) {
   return await notify({
     to: user.email,
     subject: 'Verify your Helpman email',
-    html: shell('Verify your email', `Hi ${user.name.split(' ')[0]}, please confirm this is your email address:`, [
+    html: shell('Verify your email', `Hi ${greetName(user.name)}, please confirm this is your email address:`, [
       ['Account', user.email],
       ['Verify link', link],
     ]) + `<p style="text-align:center;margin:20px 0;"><a href="${link}" style="background:#111827;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Verify my email</a></p>`,
@@ -267,7 +268,7 @@ router.post('/forgot', ah(async (req, res) => {
   await notify({
     to: user.email,
     subject: 'Reset your Helpman password',
-    html: shell('Reset your password', `Hi ${user.name.split(' ')[0]}, use the link below within 1 hour:`, [
+    html: shell('Reset your password', `Hi ${greetName(user.name)}, use the link below within 1 hour:`, [
       ['Reset link', link],
     ]) + `<p style="text-align:center;margin:20px 0;"><a href="${link}" style="background:#111827;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Reset password</a></p>`,
   }).catch(() => {});

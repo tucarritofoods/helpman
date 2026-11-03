@@ -85,11 +85,17 @@
     let r;
     try { r = await HP.api('GET', '/admin/settings'); }
     catch (e) { box.innerHTML = `<div class="banner banner-warn">Could not load the rules: ${HP.esc(HP.friendlyMessage(e))}</div>`; return; }
-    const GROUPS = { money: 'Money', timing: 'Reminders and timeframes' };
+    const GROUPS = { money: 'Money', timing: 'Reminders and timeframes', dispatch: 'Automatic offers' };
+    // A 0/1 rule is an on/off switch, not a number to type.
+    const input = (x) => (x.min === 0 && x.max === 1)
+      ? `<select id="rule-${HP.esc(x.key)}" name="${HP.esc(x.key)}" style="max-width:9rem">
+          <option value="1"${Number(x.value) === 1 ? ' selected' : ''}>On</option>
+          <option value="0"${Number(x.value) === 0 ? ' selected' : ''}>Off</option></select>`
+      : `<input type="number" id="rule-${HP.esc(x.key)}" name="${HP.esc(x.key)}" min="${x.min}" max="${x.max}" step="1" value="${Number(x.value)}" style="max-width:9rem">`;
     const field = (x) => `
       <div class="field" style="max-width:640px">
         <label for="rule-${HP.esc(x.key)}">${HP.esc(x.label)} ${x.pending_owner ? HP.badge('Owner decision', 'warn') : ''}</label>
-        <input type="number" id="rule-${HP.esc(x.key)}" name="${HP.esc(x.key)}" min="${x.min}" max="${x.max}" step="1" value="${Number(x.value)}" style="max-width:9rem">
+        ${input(x)}
         <p class="small muted" style="margin:.2rem 0 0">${HP.esc(x.help || '')}</p>
       </div>`;
     box.innerHTML = `<form id="rules-form" novalidate>${Object.keys(GROUPS).map((g) => {

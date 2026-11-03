@@ -17,6 +17,7 @@
 // Every function here is idempotent or guarded by an atomic UPDATE: a retry, a
 // double click or a replayed webhook never charges, refunds or pays twice.
 'use strict';
+const { greetName } = require('./notify');
 const db = require('../db');
 const settings = require('./settings');
 
@@ -316,7 +317,7 @@ async function transferPayable(pb, { actorId = null, ignoreHold = false } = {}) 
     await notify({
       to: cu.email,
       subject: `Payout sent — project #${pb.project_id} (${money(pb.payable_cents)})`,
-      html: shell('Your payout is on its way', `Hi ${String(cu.name || '').split(' ')[0]}, Helpman sent your payment to your Stripe payout account. Stripe deposits it in your bank on its usual schedule.`, [
+      html: shell('Your payout is on its way', `Hi ${greetName(cu.name || '')}, Helpman sent your payment to your Stripe payout account. Stripe deposits it in your bank on its usual schedule.`, [
         ['Project', `#${pb.project_id}`], ['Amount', money(pb.payable_cents)], ['Reference', tr.id],
       ]),
     }).catch(() => {});
@@ -418,7 +419,7 @@ async function cancelProject(project, { kind, actorId, reason }) {
     if (cu && cu.email) {
       const { notify, shell } = require('./notify');
       await notify({ to: cu.email, subject: `Job #${project.id} cancelled`,
-        html: shell('This job was cancelled', `Hi ${String(cu.name || '').split(' ')[0]}, Helpman cancelled job #${project.id}. You do not need to go. Questions? Message support from your portal.`, [['Job', `#${project.id}`]]) }).catch(() => {});
+        html: shell('This job was cancelled', `Hi ${greetName(cu.name || '')}, Helpman cancelled job #${project.id}. You do not need to go. Questions? Message support from your portal.`, [['Job', `#${project.id}`]]) }).catch(() => {});
     }
   }
   return { ...q, refund };

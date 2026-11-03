@@ -216,6 +216,8 @@ async function applySucceededIntent(pi) {
     // Email the customer: deposit received + Terms of Service.
     const { depositConfirmationEmail } = require('./notify');
     await depositConfirmationEmail(pid).catch(() => {});
+    // Corte 8: the deposit is in — offer the job automatically (if on).
+    await require('./dispatch').autoOffer(Number(pid), { reason: 'deposit' });
   }
   if (kind === 'final' && pid) await require('./billing').onBalancePaid(Number(pid));
   return true;

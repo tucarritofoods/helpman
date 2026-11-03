@@ -1,3 +1,4 @@
+const { greetName } = require('./notify');
 // Two-sided CRM engine.
 // CLIENT side:    lead -> quote -> project -> review -> referral/repurchase
 // CONTRACTOR side: applicant -> verification -> active -> performance -> retention
@@ -264,7 +265,7 @@ async function runFollowupAutomation() {
     await notify({
       to,
       subject: `Still thinking about your Helpman quote? (#${t.quote_id})`,
-      html: shell('A quick reminder', `Hi ${(t.name || '').split(' ')[0]}, your quote is still waiting:`, [
+      html: shell('A quick reminder', `Hi ${greetName(t.name || '')}, your quote is still waiting:`, [
         ['Quote', `#${t.quote_id} — $${(t.customer_price_cents / 100).toFixed(2)}`],
         ['Next step', 'Accept it from your portal and we will schedule your project right away.'],
       ]),

@@ -3,6 +3,7 @@
 // token carries { purpose, projectId, contractorId } and expires.
 // The portal endpoints in routes/projects.js reuse the same core functions.
 'use strict';
+const { greetName } = require('./notify');
 const db = require('../db');
 const { displayName } = require('./views');
 const magic = require('./magiclink');
@@ -16,6 +17,8 @@ const {
 
 const OFFER_TTL_MS = 24 * 60 * 60 * 1000; // 24 h to answer an offer
 const SCHEDULE_TTL_MS = 24 * 60 * 60 * 1000; // 24 h to confirm a scheduled day
+// dispatch.autoOffer outcomes after which support was already emailed (or a new offer went out).
+const SUPPORT_ALREADY_TOLD = ['no_candidate', 'max_attempts', 'taken'];
 
 function offerLinks(projectId, contractorId) {
   const token = magic.sign({ purpose: 'offer', projectId, contractorId }, OFFER_TTL_MS);
@@ -37,30 +40,41 @@ function scheduleLinks(projectId, contractorId) {
   };
 }
 
-// Release offers nobody answered in time; notify dispatch to reassign.
+// Release offers nobody answered in time. Corte 8: the job is offered again
+// automatically to the next pro; support hears about it only when that is not
+// possible (auto offers off, cap reached or nobody fits — dispatch.autoOffer
+// emails support itself in the last two cases).
 async function releaseExpiredOffers() {
   const now = new Date().toISOString();
   const stale = await db.prepare(
     `SELECT id FROM projects WHERE contractor_status = 'offered' AND offer_expires_at IS NOT NULL AND offer_expires_at < ?`
   ).all(now);
+  const dispatch = require('./dispatch');
+  let released = 0;
   for (const s of stale) {
     const p = await db.prepare('SELECT * FROM projects WHERE id = ?').get(s.id);
     if (!p || p.contractor_status !== 'offered') continue;
-    await db.prepare(
+    const r = await db.prepare(
       `UPDATE projects SET contractor_id = NULL, contractor_status = NULL, offer_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND contractor_status = 'offered'`
     ).run(p.id);
+    if (r.changes !== 1) continue; // another sweep got here first
+    released++;
+    await dispatch.recordEvent(p.id, p.contractor_id, 'expired', 'no answer in 24 h');
     await auditLog(null, 'project.offer_expired', 'projects', p.id, 'Offer expired without an answer; released for reassignment');
-    const job = await db.prepare('SELECT service_type FROM job_requests WHERE id = ?').get(p.job_request_id);
-    const admins = await db.prepare("SELECT email FROM users WHERE role = 'admin'").all();
-    for (const a of admins) {
-      await notify({
-        to: a.email,
-        subject: `Offer expired — project #${p.id} needs a contractor`,
-        html: `<p>The 24-hour job offer for project #${p.id} (${esc(job ? job.service_type : '')}) expired with no answer. Please assign another professional.</p>`,
-      }).catch(() => {});
+    const again = await dispatch.autoOffer(p.id, { reason: 'expired' });
+    if (!again.offered && !SUPPORT_ALREADY_TOLD.includes(again.why)) {
+      const job = await db.prepare('SELECT service_type FROM job_requests WHERE id = ?').get(p.job_request_id);
+      const admins = await db.prepare("SELECT email FROM users WHERE role = 'admin'").all();
+      for (const a of admins) {
+        await notify({
+          to: a.email,
+          subject: `Offer expired — project #${p.id} needs a contractor`,
+          html: `<p>The 24-hour job offer for project #${p.id} (${esc(job ? job.service_type : '')}) expired with no answer. Please assign another professional.</p>`,
+        }).catch(() => {});
+      }
     }
   }
-  return stale.length;
+  return released;
 }
 
 async function partiesFor(p) {
@@ -83,6 +97,7 @@ async function acceptOffer(p, { userId, ip, booking }) {
   if (p.stage !== 'scheduled') await require('./events').stage(p.id, p.stage, 'scheduled', userId);
   await db.prepare(`UPDATE job_requests SET status = 'assigned', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(p.job_request_id);
   await recordAcceptance({ userId, kind: 'contractor_job', referenceId: p.id, version: CONTRACTOR_TERMS_VERSION, ip: ip || null });
+  await require('./dispatch').recordEvent(p.id, p.contractor_id, 'accepted', booking ? 'booked the visit' : null);
   await auditLog(userId, 'project.contractor_accepted', 'projects', p.id, `Contractor accepted under terms v${CONTRACTOR_TERMS_VERSION}`);
   await touchInteraction(p.job_request_id, 'contractor_reply', 'offer accepted');
 
@@ -115,19 +130,27 @@ async function acceptOffer(p, { userId, ip, booking }) {
 // ---- Decline a job offer (portal or magic link) ----
 async function declineOffer(p, { userId }) {
   const { job } = await partiesFor(p);
-  await db.prepare(
-    `UPDATE projects SET contractor_id = NULL, contractor_status = NULL, offer_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+  const r = await db.prepare(
+    `UPDATE projects SET contractor_id = NULL, contractor_status = NULL, offer_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND contractor_status = 'offered'`
   ).run(p.id);
+  if (r.changes !== 1) return { accepted: false };
+  const dispatch = require('./dispatch');
+  await dispatch.recordEvent(p.id, p.contractor_id, 'declined', null);
   await auditLog(userId, 'project.contractor_declined', 'projects', p.id, 'Contractor declined the offer');
-  const admins = await db.prepare("SELECT email FROM users WHERE role = 'admin'").all();
-  for (const a of admins) {
-    await notify({
-      to: a.email,
-      subject: `Contractor declined project #${p.id}`,
-      html: `<p>The contractor declined the job offer for project #${p.id} (${esc(job ? job.service_type : '')}). Please assign another professional.</p>`,
-    }).catch(() => {});
-  }
   await touchInteraction(p.job_request_id, 'contractor_reply', 'offer declined');
+  // Corte 8: offer it to the next pro automatically; support is told only when
+  // that is not possible.
+  const again = await dispatch.autoOffer(p.id, { reason: 'declined' });
+  if (!again.offered && !SUPPORT_ALREADY_TOLD.includes(again.why)) {
+    const admins = await db.prepare("SELECT email FROM users WHERE role = 'admin'").all();
+    for (const a of admins) {
+      await notify({
+        to: a.email,
+        subject: `Contractor declined project #${p.id}`,
+        html: `<p>The contractor declined the job offer for project #${p.id} (${esc(job ? job.service_type : '')}). Please assign another professional.</p>`,
+      }).catch(() => {});
+    }
+  }
   return { accepted: false };
 }
 
@@ -269,7 +292,7 @@ async function bookVisitByPro(p, visit, { userId }) {
     await notify({
       to: cont.user_email,
       subject: `Visit booked — ${prettyDay(visit.date)} (#${p.id})`,
-      html: shell('Your visit is booked', `Hi ${String(cont.user_name).split(' ')[0]}, the customer has been told. Arrive within the window; you will get a reminder the day before.`, [
+      html: shell('Your visit is booked', `Hi ${greetName(cont.user_name)}, the customer has been told. Arrive within the window; you will get a reminder the day before.`, [
         ['Job', `#${p.id} — ${job ? job.service_type : ''}`], ['Day', prettyDay(visit.date)], ['Arrival window', visit.window],
         ['Address', job ? [job.address, job.city, job.zip].filter(Boolean).join(', ') : ''],
       ]),

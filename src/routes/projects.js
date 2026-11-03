@@ -1,3 +1,4 @@
+const { greetName } = require('../services/notify');
 // Projects: execution flow with milestones, client approvals, tracking, photos.
 const express = require('express');
 const { requireStaff, can } = require('../services/permissions');
@@ -204,17 +205,9 @@ router.post('/:id/assign', authRequired, requireStaff('dispatch'), ah(async (req
   if (!p) return res.status(404).json({ error: 'Project not found.' });
   const c = await db.prepare('SELECT * FROM contractors WHERE id = ?').get((req.body || {}).contractor_id);
   if (!c) return res.status(400).json({ error: 'Contractor not found.' });
-  if (c.status !== 'active') return res.status(400).json({ error: 'Contractor is not active.' });
-  // Gate: the customer sees the technician's photo — no photo, no offer.
-  if (!c.photo_filename) {
-    return res.status(409).json({ error: 'This contractor has no profile photo. Ask them to upload one from their portal before offering jobs.' });
-  }
-  // Gate: no contractor is offered a job until the deposit is in.
-  const jobRow = await db.prepare('SELECT status FROM job_requests WHERE id = ?').get(p.job_request_id);
-  if (!jobRow || !['deposit_paid', 'assigned', 'scheduled', 'in_progress', 'review'].includes(jobRow.status)) {
-    return res.status(409).json({ error: 'The deposit has not been paid yet. Offer the job after the deposit is recorded.' });
-  }
-  const expiresAt = new Date(Date.now() + offers.OFFER_TTL_MS).toISOString();
+  const dispatch = require('../services/dispatch');
+  const gate = await dispatch.checkOfferable(p, c);
+  if (gate) return res.status(gate === 'Contractor is not active.' ? 400 : 409).json({ error: gate });
   // Company technicians are ASSIGNED (no offer to accept); independent contractors are OFFERED the job.
   const direct = (req.body || {}).direct === true;
   if (direct && (c.provider_type || 'contractor') !== 'employee') {
@@ -230,34 +223,16 @@ router.post('/:id/assign', authRequired, requireStaff('dispatch'), ah(async (req
       await notify({
         to: cu2.email,
         subject: `New assignment — ${job2.service_type} (#${p.id})`,
-        html: shell('You were assigned a job', `Hi ${cu2.name.split(' ')[0]}, you were assigned a project; it is already on your schedule. Details are in your portal.`, []),
+        html: shell('You were assigned a job', `Hi ${greetName(cu2.name)}, you were assigned a project; it is already on your schedule. Details are in your portal.`, []),
       }).catch(() => {});
     }
     return res.json(await db.prepare('SELECT * FROM projects WHERE id = ?').get(p.id));
   }
-  await db.prepare(`UPDATE projects SET contractor_id = ?, contractor_status = 'offered', offer_expires_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-    .run(c.id, expiresAt, p.id);
-  await auditLog(req.user.id, 'project.contractor_offered', 'projects', p.id, `Project offered to contractor #${c.id}`);
-
-  // Notify the contractor with one-click accept / decline (magic link, 24 h).
-  const cu = await db.prepare('SELECT name, email FROM users WHERE id = ?').get(c.user_id);
-  const job = await db.prepare('SELECT * FROM job_requests WHERE id = ?').get(p.job_request_id);
-  if (cu && cu.email) {
-    const { jobOfferContractor } = require('../services/notify');
-    const links = offers.offerLinks(p.id, c.id);
-    await notify({
-      to: cu.email,
-      subject: `New job offer — ${job.service_type} (#${p.id})`,
-      html: jobOfferContractor({
-        name: cu.name.split(' ')[0], projectId: p.id, serviceType: job.service_type,
-        // City + ZIP only: the street address is released when the pro accepts.
-        address: [job.city, job.zip].filter(Boolean).join(' ') || 'Service area',
-        budget: '$' + (p.contractor_cost_cents / 100).toFixed(2),
-        acceptUrl: links.acceptUrl, declineUrl: links.declineUrl,
-        expiresNote: 'The offer expires in 24 hours.',
-      }),
-    }).catch(() => {});
+  // Replacing a pending offer: the previous pro's offer ends here.
+  if (p.contractor_status === 'offered' && p.contractor_id && p.contractor_id !== c.id) {
+    await dispatch.recordEvent(p.id, p.contractor_id, 'expired', 'replaced by dispatch');
   }
+  await dispatch.offerProject(p, c, { actorId: req.user.id, auto: false });
   res.json(await db.prepare('SELECT * FROM projects WHERE id = ?').get(p.id));
 }));
 
@@ -282,6 +257,11 @@ router.post('/:id/contractor-respond', authRequired, ah(async (req, res) => {
 
   if (!accept) {
     return res.json(await offers.declineOffer(p, { userId: req.user.id }));
+  }
+  // Corte 8 (same principle as A1-20): accepting binds the PRO to the
+  // Independent Contractor Terms — staff can withdraw an offer, never accept it for them.
+  if (req.user.role !== 'contractor') {
+    return res.status(403).json({ error: 'Only the professional can accept this job.', code: 'CONTRACTOR_ONLY' });
   }
 
   // Legal gate: accepting the job requires explicit acceptance of the
@@ -395,7 +375,7 @@ router.post('/:id/offers/:oid/accept', authRequired, requireStaff('dispatch'), a
     await notify({
       to: cu.email,
       subject: `Your estimate was approved — project #${p.id}`,
-      html: shell('Estimate approved ✓', `Hi ${cu.name.split(' ')[0]}, Helpman approved your proposed price:`, [
+      html: shell('Estimate approved ✓', `Hi ${greetName(cu.name)}, Helpman approved your proposed price:`, [
         ['Project', `#${p.id} — ${job.service_type}`],
         ['Approved price', '$' + (o.proposed_cents / 100).toFixed(2)],
         ['Next step', 'Accept the job from your portal to get it scheduled.'],

@@ -79,6 +79,21 @@ const RULES = {
     default: () => 90,
     help: 'Used by the client list and by campaign audiences.',
   },
+  // Corte 8: automatic offers (owner decision). 1 = on, 0 = off.
+  auto_offer_enabled: {
+    group: 'dispatch',
+    label: 'Offer the job automatically to the best professional when the deposit is in',
+    type: 'int', min: 0, max: 1,
+    default: () => 1,
+    help: 'On: Helpman offers the job to the best-ranked verified pro with that trade, and offers it again only if the offer expires or is declined. Off: dispatch assigns every job by hand.',
+  },
+  auto_offer_max_attempts: {
+    group: 'dispatch',
+    label: 'Automatic offers per job before support takes over',
+    type: 'int', min: 1, max: 10,
+    default: () => 3,
+    help: 'Each automatic offer goes to a different pro. After this many, support gets an email to assign by hand.',
+  },
 };
 
 async function rawAll() {

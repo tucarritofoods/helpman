@@ -144,12 +144,28 @@ function contractorForCustomer(c, photoUrl) {
   };
 }
 
+// Payments as the customer sees them: what, how much, status, when. Internal
+// bookkeeping notes ("recorded manually (Stripe not configured)", "Stripe
+// confirmed", mismatches) and provider references stay with finance.
+const PAYMENT_FIELDS_FOR_CUSTOMER = ['id', 'project_id', 'kind', 'amount_cents', 'status', 'created_at', 'paid_at'];
+function paymentForCustomer(pay) {
+  if (!pay) return pay;
+  const out = {};
+  for (const k of PAYMENT_FIELDS_FOR_CUSTOMER) if (pay[k] !== undefined) out[k] = pay[k];
+  return out;
+}
+
 function projectForCustomer(full, photoUrl) {
   if (!full) return full;
   const out = { ...full };
   for (const k of CUSTOMER_PROJECT_HIDDEN) delete out[k];
   if (out.job) { const { claim_token, ...job } = out.job; out.job = job; }
-  out.contractor = full.contractor ? contractorForCustomer(full.contractor, photoUrl) : null;
+  if (Array.isArray(out.payments)) out.payments = out.payments.map(paymentForCustomer);
+  // Golden rule: the customer meets the pro only once the pro has ACCEPTED.
+  // While a job is merely offered (and maybe re-offered) there is nobody to show.
+  const accepted = full.contractor_status === 'accepted';
+  out.contractor = accepted && full.contractor ? contractorForCustomer(full.contractor, photoUrl) : null;
+  if (!accepted) { out.contractor_id = null; out.contractor_status = null; delete out.offer_expires_at; }
   return out;
 }
 
@@ -245,7 +261,7 @@ function responseGuard(req, res, next) {
 module.exports = {
   REDACTED, redactContacts, redactDeep, displayName, firstName,
   jobForContractor, projectForContractor, changeOrderForContractor, reviewForContractor,
-  contractorForCustomer, projectForCustomer, quoteForCustomer,
+  contractorForCustomer, projectForCustomer, quoteForCustomer, paymentForCustomer,
   guardPayload, responseGuard,
   _sets: { SECRET_KEYS, CONTRACTOR_HIDDEN, CUSTOMER_HIDDEN },
 };

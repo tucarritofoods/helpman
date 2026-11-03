@@ -3,6 +3,7 @@
 // The platform RECORDS payouts; moving the money (ACH, check, Zelle...) happens
 // outside — or via Stripe Connect in a later phase.
 'use strict';
+const { greetName } = require('../services/notify');
 const express = require('express');
 const { requireStaff, can } = require('../services/permissions');
 const db = require('../db');
@@ -128,7 +129,7 @@ router.post('/:id/pay', ah(async (req, res) => {
     await notify({
       to: cu.email,
       subject: `Payout sent — project #${pb.project_id} (${money(pb.payable_cents)})`,
-      html: shell('Your payout was sent', `Hi ${String(cu.name || '').split(' ')[0]}, we paid your work on this project.`, [
+      html: shell('Your payout was sent', `Hi ${greetName(cu.name || '')}, we paid your work on this project.`, [
         ['Project', `#${pb.project_id}`], ['Amount', money(pb.payable_cents)], ['Method', b.method],
         ...(b.reference ? [['Reference', String(b.reference).slice(0, 200)]] : []),
       ]),

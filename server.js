@@ -298,6 +298,13 @@ setInterval(() => {
     .catch(e => console.error('[outbox]', e.message));
 }, 30 * 1000).unref();
 
+// ---- Background: release unanswered job offers and offer them again (every 5 min) ----
+setInterval(() => {
+  require('./src/services/offers').releaseExpiredOffers()
+    .then(n => { if (n) console.log('[offers] expired', n); })
+    .catch(e => console.error('[offers]', e.message));
+}, 5 * 60 * 1000).unref();
+
 // ---- Background: day-before visit reminders (every 10 min; only sends inside the daytime window) ----
 const smsSvc = require('./src/services/sms');
 setInterval(() => {

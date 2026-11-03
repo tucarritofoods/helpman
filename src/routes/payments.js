@@ -237,6 +237,7 @@ router.get('/', authRequired, ah(async (req, res) => {
        JOIN job_requests j ON j.id = p.job_request_id
        WHERE j.customer_id = ? ${project_id ? 'AND pay.project_id = ?' : ''} ORDER BY pay.id`
     ).all(req.user.id, ...(project_id ? [project_id] : []));
+    return res.json(rows.map(require('../services/views').paymentForCustomer));
   }
   res.json(rows);
 }));
@@ -265,6 +266,8 @@ router.post('/', authRequired, requireStaff('finance'), ah(async (req, res) => {
     // Confirm to the customer (payment + Terms of Service).
     const { depositConfirmationEmail } = require('../services/notify');
     await depositConfirmationEmail(b.project_id).catch(() => {});
+    // Corte 8: the deposit is in — offer the job automatically (if on).
+    await require('../services/dispatch').autoOffer(Number(b.project_id), { reason: 'deposit' });
   }
   await auditLog(req.user.id, 'payment.recorded', 'payments', info.lastInsertRowid, `${b.kind} ${b.amount_cents} cents (manual) on project #${b.project_id}`);
   res.status(201).json(await db.prepare('SELECT * FROM payments WHERE id = ?').get(info.lastInsertRowid));

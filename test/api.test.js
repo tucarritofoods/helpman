@@ -2324,7 +2324,9 @@ test('magic-link offer: summary, accept with terms, tamper-proof, expiry', async
   assert.equal((await api('GET', `/api/offers/${t2}`)).status, 410, 'expired offer closed');
   const rel = await db.prepare('SELECT contractor_id, contractor_status FROM projects WHERE id=?').get(pid2);
   assert.equal(rel.contractor_id, null, 'expired offer released');
-  assert.ok(await db.prepare("SELECT * FROM email_log WHERE to_email='admin@test.local' AND subject LIKE '%Offer expired%' ORDER BY id DESC").get(),
+  // Corte 8: the only verified pro already had it, so no automatic re-offer is
+  // possible and support is told to assign by hand.
+  assert.ok(await db.prepare(`SELECT * FROM email_log WHERE to_email='admin@test.local' AND subject LIKE '%project #${pid2} needs a contractor%' ORDER BY id DESC`).get(),
     'dispatch notified of expiry');
 });
 
