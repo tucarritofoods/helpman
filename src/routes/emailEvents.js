@@ -2,7 +2,8 @@
 // go straight onto the suppression list, so we stop mailing those addresses.
 // Configure in SendGrid: Settings > Mail Settings > Event Webhook, URL:
 //   https://YOUR-DOMAIN/api/email/events?key=<SENDGRID_WEBHOOK_KEY>
-// and tick: Bounced, Dropped, Spam Reports, Unsubscribes, Group Unsubscribes.
+// and tick: Delivered, Opened, Clicked, Bounced, Dropped, Spam Reports, Unsubscribes, Group Unsubscribes
+// (Corte 5: delivered/opened/clicked feed the campaign results).
 // Auth is a shared secret in the URL (constant-time compare). NOT exercised
 // against live SendGrid in this repo's tests.
 'use strict';
@@ -22,14 +23,17 @@ router.post('/events', ah(async (req, res) => {
     return res.status(401).json({ error: 'Invalid key.' });
   }
   const events = Array.isArray(req.body) ? req.body : [];
-  let suppressed = 0;
+  let suppressed = 0, recorded = 0;
+  const campaigns = require('../services/campaigns');
   for (const ev of events) {
     if (ev && typeof ev.email === 'string' && SUPPRESS_ON.has(ev.event)) {
       await unsub.suppress(ev.email, `sendgrid:${ev.event}`);
       suppressed++;
     }
+    // Corte 5: delivered / open / click / bounce / unsubscribe → that campaign email's results.
+    if (await campaigns.recordEvent(ev).catch(() => false)) recorded++;
   }
-  res.json({ received: events.length, suppressed });
+  res.json({ received: events.length, suppressed, recorded });
 }));
 
 module.exports = router;

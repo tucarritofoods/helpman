@@ -238,13 +238,15 @@ app.get('/api/unsubscribe', (req, res) => {
   res.type('html').send(ok
     ? `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font-family:Arial,sans-serif;max-width:480px;margin:48px auto;padding:0 16px;">
 <h2>Unsubscribe</h2><p>Stop promotional emails to <strong>${email.replace(/</g, '&lt;')}</strong>? You will still get messages about your projects and account.</p>
-<form method="POST" action="/api/unsubscribe?e=${encodeURIComponent(req.query.e)}&t=${encodeURIComponent(req.query.t)}"><button style="padding:10px 18px;font-size:16px;">Yes, unsubscribe me</button></form></body>`
+<form method="POST" action="/api/unsubscribe?e=${encodeURIComponent(req.query.e)}&t=${encodeURIComponent(req.query.t)}${req.query.o ? `&o=${Number(req.query.o) || ''}` : ''}"><button style="padding:10px 18px;font-size:16px;">Yes, unsubscribe me</button></form></body>`
     : '<!doctype html><body style="font-family:Arial,sans-serif;max-width:480px;margin:48px auto;"><h2>Invalid link</h2><p>This unsubscribe link is not valid.</p></body>');
 });
 app.post('/api/unsubscribe', async (req, res) => {
   const { email, ok } = unsubParams(req);
   if (!ok) return res.status(400).type('html').send('<!doctype html><body style="font-family:Arial,sans-serif;max-width:480px;margin:48px auto;"><h2>Invalid link</h2></body>');
   await unsub.suppress(email, 'unsubscribed');
+  // Count it in the campaign's results when the link came from a campaign email.
+  if (req.query.o) await require('./src/services/campaigns').recordUnsubscribe(Number(req.query.o), email).catch(() => {});
   res.type('html').send('<!doctype html><body style="font-family:Arial,sans-serif;max-width:480px;margin:48px auto;"><h2>You are unsubscribed</h2><p>You will no longer receive promotional emails.</p></body>');
 });
 app.use('/api/health', require('./src/routes/health-v6'));
@@ -289,7 +291,11 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ---- Background: drain the campaign outbox every 30s ----
 const { processOutbox } = require('./src/routes/campaigns');
 setInterval(() => {
-  processOutbox(50).catch(e => console.error('[outbox]', e.message));
+  require('./src/services/campaigns').runScheduled()
+    .then(r => { if (r.due) console.log('[campaigns] scheduled', JSON.stringify(r)); })
+    .catch(e => console.error('[campaigns]', e.message))
+    .then(() => processOutbox(50))
+    .catch(e => console.error('[outbox]', e.message));
 }, 30 * 1000).unref();
 
 // ---- Background: day-before visit reminders (every 10 min; only sends inside the daytime window) ----

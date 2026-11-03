@@ -33,18 +33,32 @@ router.post('/templates', ah(async (req, res) => {
   res.status(201).json(await db.prepare('SELECT * FROM email_templates WHERE id = ?').get(info.lastInsertRowid));
 }));
 
-// ---- Campaigns ----
-router.get('/', ah(async (req, res) => {
-  res.json(await db.prepare(
-    `SELECT c.*, t.name AS template_name,
-       (SELECT COUNT(*) FROM email_outbox o WHERE o.campaign_id = c.id) AS recipients,
-       (SELECT COUNT(*) FROM email_outbox o WHERE o.campaign_id = c.id AND o.status = 'sent') AS sent
-     FROM campaigns c LEFT JOIN email_templates t ON t.id = c.template_id ORDER BY c.id DESC`
-  ).all());
-}));
+// ---- Corte 5: segment builder, saved segments, builder campaigns ----
+const svc = require('../services/campaigns');
+const run = (fn, okStatus) => ah(async (req, res) => {
+  try { res.status(okStatus || 200).json(await fn(req)); }
+  catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json(e.errors ? { errors: e.errors } : { error: e.message, ...(e.code ? { code: e.code } : {}), ...(e.count != null ? { count: e.count } : {}) });
+    throw e;
+  }
+});
+router.post('/builder/templates', run((req) => svc.saveTemplate(req.body || {}, req.user), 201));
+router.post('/audience', run((req) => svc.audience((req.body || {}).filters)));
+router.get('/segments', run(() => svc.listSegments()));
+router.post('/segments', run((req) => svc.saveSegment(null, req.body || {}, req.user), 201));
+router.put('/segments/:sid', run((req) => svc.saveSegment(req.params.sid, req.body || {}, req.user)));
+router.delete('/segments/:sid', run((req) => svc.deleteSegment(req.params.sid, req.user)));
+router.get('/variables', (req, res) => res.json(svc.VARS));
 
-router.post('/', ah(async (req, res) => {
+// ---- Campaigns ----
+router.get('/', run(() => svc.list()));
+
+router.post('/', ah(async (req, res, next) => {
   const b = req.body || {};
+  // Builder campaign (subject + message + audience); the older shape (segment + template) still works.
+  if (b.body_text !== undefined || b.subject !== undefined || b.filters !== undefined || b.segment_id !== undefined) {
+    return run((r) => svc.upsert(null, r.body || {}, r.user), 201)(req, res, next);
+  }
   const errors = {};
   if (!isNonEmpty(b.name, 160)) errors.name = 'Name required.';
   if (!SEGMENTS.includes(b.segment)) errors.segment = 'Unknown segment.';
@@ -55,11 +69,23 @@ router.post('/', ah(async (req, res) => {
   res.status(201).json(await db.prepare('SELECT * FROM campaigns WHERE id = ?').get(info.lastInsertRowid));
 }));
 
+router.get('/:id', run((req) => svc.detail(req.params.id)));
+router.put('/:id', run((req) => svc.upsert(req.params.id, req.body || {}, req.user)));
+router.post('/:id/preview', run((req) => svc.preview(req.params.id, req.body || {})));
+router.post('/:id/test', run((req) => svc.sendTest(req.params.id, req.user)));
+router.post('/:id/send-now', run((req) => svc.sendNow(req.params.id, req.body || {}, req.user)));
+router.post('/:id/schedule', run((req) => svc.schedule(req.params.id, req.body || {}, req.user)));
+router.post('/:id/unschedule', run((req) => svc.unschedule(req.params.id, req.user)));
+router.post('/:id/cancel', run((req) => svc.cancel(req.params.id, req.user)));
+router.post('/:id/duplicate', run((req) => svc.duplicate(req.params.id, req.user), 201));
+router.get('/:id/results', run((req) => svc.results(req.params.id, req.query || {})));
+
 // Resolve the segment into the outbox (one row per recipient). Idempotent-ish:
 // re-queueing skips addresses already queued for this campaign.
 router.post('/:id/queue', ah(async (req, res) => {
   const c = await db.prepare('SELECT * FROM campaigns WHERE id = ?').get(req.params.id);
   if (!c) return res.status(404).json({ error: 'Campaign not found.' });
+  if (c.segment === 'builder') return res.status(409).json({ error: 'Use "Send now" or "Schedule" for this campaign.' });
   const t = await db.prepare('SELECT * FROM email_templates WHERE id = ?').get(c.template_id);
   if (!t) return res.status(400).json({ error: 'Template missing.' });
 
@@ -100,6 +126,7 @@ router.post('/:id/queue', ah(async (req, res) => {
 router.post('/:id/send', ah(async (req, res) => {
   const c = await db.prepare('SELECT * FROM campaigns WHERE id = ?').get(req.params.id);
   if (!c) return res.status(404).json({ error: 'Campaign not found.' });
+  if (c.segment === 'builder') return res.status(409).json({ error: 'Use "Send now" for this campaign.' });
   await db.prepare(`UPDATE campaigns SET status = 'sending' WHERE id = ?`).run(c.id);
   await auditLog(req.user.id, 'campaign.sent', 'campaigns', c.id, `Campaign "${c.name}" → segment ${c.segment}`);
   const n = await processOutbox(50); // also flush a batch right now for immediacy
@@ -129,13 +156,14 @@ async function processOutbox(limit = 50) {
       }
       const result = await mailer.send({
         to: r.to_email, subject: r.subject, html: r.body_html,
-        headers: { 'List-Unsubscribe': `<${unsub.link(r.to_email)}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
+        headers: { 'List-Unsubscribe': `<${unsub.link(r.to_email, r.id)}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
+        customArgs: { outbox_id: r.id, campaign_id: r.campaign_id },
       });
       await mark.run(result.ok ? 'sent' : 'failed', result.ok ? new Date().toISOString() : null, result.error || null, r.id);
       await log.run(r.id, r.to_email, r.subject, result.ok ? 'sent' : 'failed', result.provider);
       // Close out finished campaigns.
       const pending = (await db.prepare(`SELECT COUNT(*) c FROM email_outbox WHERE campaign_id = ? AND status IN ('queued','sending')`).get(r.campaign_id)).c;
-      if (pending === 0) await db.prepare(`UPDATE campaigns SET status = 'done' WHERE id = ?`).run(r.campaign_id);
+      if (Number(pending) === 0) await db.prepare(`UPDATE campaigns SET status = 'done', completed_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('queued','sending')`).run(r.campaign_id);
     } catch (err) {
       await mark.run('failed', null, String(err.message).slice(0, 200), r.id);
       await log.run(r.id, r.to_email, r.subject, 'failed', r.provider);

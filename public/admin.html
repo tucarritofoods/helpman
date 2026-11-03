@@ -270,38 +270,7 @@
     </section>
 
     <section class="tab-panel" id="panel-campaigns" role="tabpanel">
-      <div class="section">
-        <div class="section-head"><h2>Email templates</h2></div>
-        <div id="templates-list" style="margin-bottom:1rem"><p class="muted">Loading templates…</p></div>
-        <div class="card">
-          <h3 style="margin-top:0">New template</h3>
-          <form id="template-form" novalidate>
-            <div class="field"><label for="tm-name">Name <span class="req">*</span></label><input type="text" id="tm-name" name="name"><span class="field-error" data-error-for="name"></span></div>
-            <div class="field"><label for="tm-subject">Subject <span class="req">*</span></label><input type="text" id="tm-subject" name="subject"><span class="field-error" data-error-for="subject"></span></div>
-            <div class="field"><label for="tm-body">Body (HTML) <span class="req">*</span></label>
-              <textarea id="tm-body" name="body_html" rows="6"></textarea>
-              <div class="hint">You can use variables like {{name}} and {{company}} — they are filled in per recipient.</div>
-              <span class="field-error" data-error-for="body_html"></span></div>
-            <button class="btn btn-dark btn-sm" type="submit">Save template</button>
-          </form>
-        </div>
-      </div>
-      <div class="section">
-        <div class="section-head"><h2>Campaigns</h2></div>
-        <div class="card">
-          <h3 style="margin-top:0">New campaign</h3>
-          <form id="campaign-form" novalidate>
-            <div class="form-grid two">
-              <div class="field"><label for="cm-name">Name <span class="req">*</span></label><input type="text" id="cm-name" name="name"><span class="field-error" data-error-for="name"></span></div>
-              <div class="field"><label for="cm-segment">Audience segment <span class="req">*</span></label>
-                <select id="cm-segment" name="segment"></select><span class="field-error" data-error-for="segment"></span></div>
-            </div>
-            <div class="field"><label for="cm-template">Template <span class="req">*</span></label><select id="cm-template" name="template_id"></select><span class="field-error" data-error-for="template_id"></span></div>
-            <button class="btn btn-dark btn-sm" type="submit">Create campaign</button>
-          </form>
-        </div>
-        <div id="campaigns-list"><p class="muted">Loading campaigns…</p></div>
-      </div>
+      <div class="section" id="campaign-builder"><p class="muted">Loading campaigns…</p></div>
       <div class="section">
         <div class="section-head"><h2>Email log</h2></div>
         <div id="email-log"><p class="muted">Loading email log…</p></div>
@@ -329,13 +298,13 @@
   <script src="js/admin-v4.js" defer></script>
   <script src="js/plugs-v1.js" defer></script>
   <script src="js/clients-v1.js" defer></script>
+  <script src="js/campaigns-v1.js" defer></script>
   <script>
   // Helpman — admin dashboard.
   (function () {
     'use strict';
     HP.mountHeader('portal');
 
-    const SEGMENTS = ['all_customers', 'past_customers', 'inactive_clients_90d', 'lost_leads', 'all_contractors', 'pending_contractors', 'top_contractors'];
     const JOB_STATUSES = ['new', 'ai_analyzed', 'quote_sent', 'deposit_paid', 'assigned', 'scheduled', 'in_progress', 'review', 'completed', 'lost', 'cancelled'];
     const PROJECT_STAGES = ['assigned', 'scheduled', 'in_progress', 'review', 'completed', 'cancelled'];
     const loaded = {};
@@ -1570,153 +1539,10 @@
     // CAMPAIGNS
     // =================================================================
     async function loadCampaignsTab() {
+      if (window.loadCampaignBuilder) window.loadCampaignBuilder();
       if (loaded.campaigns) return;
       loaded.campaigns = true;
-      const seg = document.getElementById('cm-segment');
-      seg.innerHTML = SEGMENTS.map((s) => `<option value="${s}">${s.replace(/_/g, ' ')}</option>`).join('');
-      document.getElementById('template-form').addEventListener('submit', createTemplate);
-      document.getElementById('campaign-form').addEventListener('submit', createCampaign);
-      loadTemplates();
-      loadCampaigns();
       loadEmailLog();
-    }
-
-    async function loadTemplates() {
-      const box = document.getElementById('templates-list');
-      try {
-        const rows = await HP.api('GET', '/campaigns/templates');
-        const sel = document.getElementById('cm-template');
-        sel.innerHTML = rows.map((t) => `<option value="${t.id}">${HP.esc(t.name)}</option>`).join('') || '<option value="">No templates yet</option>';
-        box.innerHTML = rows.length ? `<div class="table-scroll"><table>
-          <thead><tr><th>Name</th><th>Subject</th><th>Created</th></tr></thead>
-          <tbody>${rows.map((t) => `<tr><td><strong>${HP.esc(t.name)}</strong></td><td>${HP.esc(t.subject)}</td><td class="small">${HP.fmtDate(t.created_at)}</td></tr>`).join('')}
-          </tbody></table></div>` : '<p class="small muted">No templates yet — create one below.</p>';
-      } catch (e) {
-        box.innerHTML = `<div class="banner banner-warn">Could not load templates: ${HP.esc(HP.friendlyMessage(e))}</div>`;
-      }
-    }
-
-    async function createTemplate(e) {
-      e.preventDefault();
-      const form = e.target;
-      HP.clearFieldErrors(form);
-      try {
-        await HP.api('POST', '/campaigns/templates', {
-          name: document.getElementById('tm-name').value.trim(),
-          subject: document.getElementById('tm-subject').value.trim(),
-          body_html: document.getElementById('tm-body').value.trim(),
-        });
-        HP.toast('Template saved.', 'ok');
-        form.reset();
-        loadTemplates();
-      } catch (err) { HP.handleFormError(form, err); }
-    }
-
-    async function loadCampaigns() {
-      const box = document.getElementById('campaigns-list');
-      box.innerHTML = '<p class="muted">Loading campaigns…</p>';
-      try {
-        const rows = await HP.api('GET', '/campaigns');
-        if (!rows.length) { box.innerHTML = HP.emptyState('No campaigns yet', 'Create one above to reach a segment of your audience.'); return; }
-        box.innerHTML = '<div class="job-list"></div>';
-        const list = box.querySelector('.job-list');
-        rows.forEach((c) => list.appendChild(campaignCard(c)));
-      } catch (e) {
-        box.innerHTML = `<div class="banner banner-warn">Could not load campaigns: ${HP.esc(HP.friendlyMessage(e))}</div>`;
-      }
-    }
-
-    function campaignCard(c) {
-      const card = HP.el(`<article class="job-card">
-        <div class="job-head">
-          <button type="button" aria-expanded="false">
-            <span class="job-title">${HP.esc(c.name)}</span><br>
-            <span class="job-meta">${HP.esc(String(c.segment).replace(/_/g, ' '))} · template: ${HP.esc(c.template_name || '—')} · ${c.recipients || 0} queued · ${c.sent || 0} sent</span>
-          </button>
-          ${HP.badge(c.status, c.status === 'done' ? 'ok' : c.status === 'draft' ? 'muted' : 'info')}
-          <span class="chev" aria-hidden="true">▾</span>
-        </div>
-        <div class="job-body"></div>
-      </article>`);
-      const head = card.querySelector('.job-head button');
-      const body = card.querySelector('.job-body');
-      let expanded = false;
-      head.addEventListener('click', async () => {
-        const open = card.classList.toggle('open');
-        head.setAttribute('aria-expanded', open);
-        if (open && !expanded) { expanded = true; await expandCampaign(c, body); }
-      });
-      return card;
-    }
-
-    async function expandCampaign(c, body) {
-      body.innerHTML = `
-        <div class="btn-row" style="margin-top:0">
-          <button class="btn btn-outline btn-sm" data-preview>Preview audience</button>
-          <button class="btn btn-dark btn-sm" data-queue>Queue emails</button>
-          <button class="btn btn-primary btn-sm" data-send>Send now</button>
-          <button class="btn btn-outline btn-sm" data-outbox>View outbox</button>
-        </div>
-        <div data-detail style="margin-top:1rem"><p class="small muted">Pick an action above.</p></div>`;
-      const detail = body.querySelector('[data-detail]');
-      body.querySelector('[data-preview]').addEventListener('click', async () => {
-        detail.innerHTML = '<p class="muted">Resolving segment…</p>';
-        try {
-          const r = await HP.api('GET', `/crm/segments/${encodeURIComponent(c.segment)}`);
-          detail.innerHTML = `<p><strong>${r.count}</strong> recipient(s) in <span class="code-chip">${HP.esc(r.segment)}</span>.</p>` +
-            (r.sample && r.sample.length ? `<div class="table-scroll"><table>
-              <thead><tr><th>Name</th><th>Email</th></tr></thead>
-              <tbody>${r.sample.map((m) => `<tr><td>${HP.esc(m.name || '—')}</td><td>${HP.esc(m.email || '—')}</td></tr>`).join('')}
-              </tbody></table></div><p class="small muted">Showing first ${r.sample.length}.</p>` : '<p class="small muted">No members in this segment yet.</p>');
-        } catch (e) { detail.innerHTML = `<div class="banner banner-warn">${HP.esc(HP.friendlyMessage(e))}</div>`; }
-      });
-      body.querySelector('[data-queue]').addEventListener('click', async (ev) => {
-        const b = ev.target; HP.busy(b, true, 'Queueing…');
-        try {
-          const r = await HP.api('POST', `/campaigns/${c.id}/queue`);
-          HP.toast(`${r.queued} email(s) queued.`, 'ok');
-          loadCampaigns();
-        } catch (e) { HP.toast(HP.friendlyMessage(e), 'error'); }
-        finally { HP.busy(b, false); }
-      });
-      body.querySelector('[data-send]').addEventListener('click', async (ev) => {
-        if (!confirm('Send this campaign now? Queued emails will go out.')) return;
-        const b = ev.target; HP.busy(b, true, 'Sending…');
-        try {
-          const r = await HP.api('POST', `/campaigns/${c.id}/send`);
-          HP.toast(`Sending started — ${r.flushed_now || 0} flushed immediately.`, 'ok');
-          loadCampaigns(); loadEmailLog();
-        } catch (e) { HP.toast(HP.friendlyMessage(e), 'error'); }
-        finally { HP.busy(b, false); }
-      });
-      body.querySelector('[data-outbox]').addEventListener('click', async () => {
-        detail.innerHTML = '<p class="muted">Loading outbox…</p>';
-        try {
-          const rows = await HP.api('GET', `/campaigns/${c.id}/outbox`);
-          detail.innerHTML = rows.length ? `<div class="table-scroll"><table>
-            <thead><tr><th>To</th><th>Subject</th><th>Status</th><th>Provider</th><th>Sent</th></tr></thead>
-            <tbody>${rows.map((o) => `<tr><td class="small">${HP.esc(o.to_email)}</td><td class="small">${HP.esc(o.subject)}</td>
-              <td>${HP.badge(o.status, o.status === 'sent' ? 'ok' : o.status === 'failed' ? 'err' : 'info')}</td>
-              <td class="small">${HP.esc(o.provider || '')}</td><td class="small">${o.sent_at ? HP.fmtDateTime(o.sent_at) : '—'}</td></tr>`).join('')}
-            </tbody></table></div>` : '<p class="small muted">Outbox is empty — queue emails first.</p>';
-        } catch (e) { detail.innerHTML = `<div class="banner banner-warn">${HP.esc(HP.friendlyMessage(e))}</div>`; }
-      });
-    }
-
-    async function createCampaign(e) {
-      e.preventDefault();
-      const form = e.target;
-      HP.clearFieldErrors(form);
-      try {
-        await HP.api('POST', '/campaigns', {
-          name: document.getElementById('cm-name').value.trim(),
-          segment: document.getElementById('cm-segment').value,
-          template_id: Number(document.getElementById('cm-template').value),
-        });
-        HP.toast('Campaign created as a draft.', 'ok');
-        form.reset();
-        loadCampaigns();
-      } catch (err) { HP.handleFormError(form, err); }
     }
 
     async function loadEmailLog() {

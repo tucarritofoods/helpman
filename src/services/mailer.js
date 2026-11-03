@@ -35,9 +35,11 @@ function activeProvider() {
   return 'console';
 }
 
-async function send({ to, subject, html, headers }) {
+// customArgs (campaigns): echoed back by SendGrid in its event webhook so delivered /
+// open / click / bounce can be tied to the exact outbox row.
+async function send({ to, subject, html, headers, customArgs }) {
   const provider = activeProvider();
-  if (provider === 'sendgrid') return sendViaSendGrid({ to, subject, html, headers });
+  if (provider === 'sendgrid') return sendViaSendGrid({ to, subject, html, headers, customArgs });
   return sendViaConsole({ to, subject, html });
 }
 
@@ -47,12 +49,12 @@ async function sendViaConsole({ to, subject, html }) {
   return { ok: true, provider: 'console' };
 }
 
-async function sendViaSendGrid({ to, subject, html, headers }) {
+async function sendViaSendGrid({ to, subject, html, headers, customArgs }) {
   const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SENDGRID_KEY}` },
     body: JSON.stringify({
-      personalizations: [{ to: [{ email: to }] }],
+      personalizations: [{ to: [{ email: to }], ...(customArgs ? { custom_args: Object.fromEntries(Object.entries(customArgs).map(([k, v]) => [k, String(v)])) } : {}) }],
       from: { email: FROM_EMAIL, name: FROM_NAME },
       subject,
       content: [{ type: 'text/html', value: html }],

@@ -852,6 +852,56 @@ for (const [col, type] of [['customer_id', 'INTEGER REFERENCES users(id) ON DELE
 }
 db.exec(`CREATE INDEX IF NOT EXISTS idx_followup_tasks_customer ON followup_tasks(customer_id)`);
 
+// ---- Corte 5: CRM Campaigns (saved segments, scheduling, per-recipient results) ----
+// Mirrored for PostgreSQL in src/db/migrations/016_campaigns.sql.
+db.exec(`CREATE TABLE IF NOT EXISTS crm_segments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  filters_json TEXT NOT NULL,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`);
+// campaigns: wider status CHECK (scheduled, cancelled) + the composed message and schedule.
+// SQLite cannot alter a CHECK, so the table is rebuilt once (foreign keys off so the
+// outbox rows that point at it are kept).
+try {
+  const t = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='campaigns'`).get();
+  if (t && t.sql && !t.sql.includes("'scheduled'")) {
+    db.pragma('foreign_keys = OFF');
+    db.exec(`
+      CREATE TABLE campaigns_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        segment TEXT NOT NULL,
+        template_id INTEGER REFERENCES email_templates(id) ON DELETE SET NULL,
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','scheduled','queued','sending','done','cancelled')),
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO campaigns_new (id, name, segment, template_id, status, created_at) SELECT id, name, segment, template_id, status, created_at FROM campaigns;
+      DROP TABLE campaigns;
+      ALTER TABLE campaigns_new RENAME TO campaigns;
+    `);
+    db.pragma('foreign_keys = ON');
+  }
+} catch (e) {
+  try { db.pragma('foreign_keys = ON'); } catch (_) { /* ignore */ }
+  console.error('[migrate] campaigns table migration failed:', e.message);
+}
+for (const [col, type] of [['segment_id', 'INTEGER REFERENCES crm_segments(id) ON DELETE SET NULL'], ['filters_json', 'TEXT'], ['subject', 'TEXT'],
+  ['body_text', 'TEXT'], ['button_label', 'TEXT'], ['button_url', 'TEXT'], ['scheduled_at', 'TEXT'], ['started_at', 'TEXT'], ['completed_at', 'TEXT'],
+  ['cancelled_at', 'TEXT'], ['created_by', 'INTEGER REFERENCES users(id) ON DELETE SET NULL'], ['audience_count', 'INTEGER'], ['test_sent_at', 'TEXT'], ['updated_at', 'TEXT']]) {
+  if (!columnExists('campaigns', col)) db.exec(`ALTER TABLE campaigns ADD COLUMN ${col} ${type}`);
+}
+for (const [col, type] of [['body_text', 'TEXT'], ['button_label', 'TEXT'], ['button_url', 'TEXT']]) {
+  if (!columnExists('email_templates', col)) db.exec(`ALTER TABLE email_templates ADD COLUMN ${col} ${type}`);
+}
+for (const [col, type] of [['delivered_at', 'TEXT'], ['opened_at', 'TEXT'], ['clicked_at', 'TEXT'], ['bounced_at', 'TEXT'], ['unsubscribed_at', 'TEXT'],
+  ['open_count', 'INTEGER NOT NULL DEFAULT 0'], ['click_count', 'INTEGER NOT NULL DEFAULT 0'], ['recipient_user_id', 'INTEGER']]) {
+  if (!columnExists('email_outbox', col)) db.exec(`ALTER TABLE email_outbox ADD COLUMN ${col} ${type}`);
+}
+db.exec(`CREATE INDEX IF NOT EXISTS idx_outbox_campaign ON email_outbox(campaign_id)`);
+
 // ---- Migrate payments.provider CHECK to include 'stripe' (was manual/stripe_stub) ----
 // Also adds 'paid' to the status CHECK for Stripe-confirmed payments.
 // 2026-10-07: also adds 'simulated' provider for the test payment mode.

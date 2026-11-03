@@ -50,10 +50,21 @@ async function loadIndex() {
   }
   for (const t of await db.prepare('SELECT user_id, tag FROM customer_tags').all()) { const c = byId.get(t.user_id); if (c) c.tags.push(t.tag); }
 
-  const jobs = await db.prepare(`SELECT id, customer_id, email, city, zip, service_type, status, created_at, updated_at FROM job_requests ORDER BY id`).all();
+  const jobs = await db.prepare(`SELECT id, customer_id, name, phone, email, city, zip, service_type, status, created_at, updated_at FROM job_requests ORDER BY id`).all();
   const jobOwner = new Map();
+  const guests = new Map();
   for (const j of jobs) {
-    const c = (j.customer_id && byId.get(j.customer_id)) || (!j.customer_id && j.email && byEmail.get(norm(j.email)));
+    let c = (j.customer_id && byId.get(j.customer_id)) || (!j.customer_id && j.email && byEmail.get(norm(j.email)));
+    if (!c && !j.customer_id && j.email) {
+      // Someone who asked for a quote without an account: a "guest" (campaign audiences only).
+      const e = norm(j.email);
+      c = guests.get(e);
+      if (!c) {
+        c = { id: null, guest: true, name: j.name || '', email: e, phone: j.phone || '', email_verified: false, created_at: iso(j.created_at),
+          tags: [], jobs: [], projects: [], spend_cents: 0, last_activity: ts(j.created_at), city: '', zip: '', services: new Set() };
+        guests.set(e, c);
+      }
+    }
     if (!c) continue;
     jobOwner.set(j.id, c);
     c.jobs.push(j);
@@ -86,7 +97,7 @@ async function loadIndex() {
   }
 
   const now = Date.now();
-  for (const c of byId.values()) {
+  for (const c of [...byId.values(), ...guests.values()]) {
     const open = c.projects.some((p) => OPEN_STAGES.includes(p.stage) && depositPaid.has(p.id));
     const done = c.projects.some((p) => p.stage === 'completed');
     let lc;
@@ -106,7 +117,7 @@ async function loadIndex() {
     c.last_service = c.jobs.length ? c.jobs[c.jobs.length - 1].service_type : null;
     c.services = [...c.services];
   }
-  return { byId, byEmail };
+  return { byId, byEmail, guests };
 }
 
 const SORTS = {
@@ -530,6 +541,6 @@ async function unsubscribeMarketing(id, actor) {
 }
 
 module.exports = {
-  LIFECYCLES, SPECIAL_TAGS, LOST_AFTER_DAYS, cleanTag, list, summary, requestsAndProjects, money, messages, notes, tasks, consents, campaignsReceived, history,
+  LIFECYCLES, SPECIAL_TAGS, LOST_AFTER_DAYS, cleanTag, loadIndex, list, summary, requestsAndProjects, money, messages, notes, tasks, consents, campaignsReceived, history,
   setTags, allTags, isBlocked, addNote, updateNote, deleteNote, addTask, setTaskStatus, emailClient, createRequest, resendAccess, unsubscribeMarketing,
 };
