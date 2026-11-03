@@ -289,8 +289,32 @@ router.post('/:id/contractor-respond', authRequired, ah(async (req, res) => {
   if (!termsAccepted) {
     return res.status(400).json({ error: 'You must accept the Independent Contractor Terms to take this job.' });
   }
-  await offers.acceptOffer(p, { userId: req.user.id, ip: req.ip || null });
-  res.json({ accepted: true, project: await projectView(req, p.id) });
+  // Corte 7: the pro may book the visit (day + arrival window) in the same step.
+  const v = await offers.validateVisit(p, req.body || {});
+  if (v.errors) return res.status(422).json({ errors: v.errors });
+  await offers.acceptOffer(p, { userId: req.user.id, ip: req.ip || null, booking: !!v.visit });
+  if (v.visit) await offers.bookVisitByPro(p, v.visit, { userId: req.user.id });
+  res.json({ accepted: true, booked: !!v.visit, project: await projectView(req, p.id) });
+}));
+
+// ---- Corte 7: what the pro needs to book the visit while accepting an offer ----
+// The customer's timing wish (notes cleaned of contact details), the allowed arrival windows,
+// and the pro's own visits in the next weeks (to avoid a double booking).
+router.get('/:id/booking-options', authRequired, ah(async (req, res) => {
+  const p = await db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Project not found.' });
+  if (req.user.role === 'contractor') {
+    const c = await db.prepare('SELECT id FROM contractors WHERE user_id = ?').get(req.user.id);
+    if (!c || p.contractor_id !== c.id) return res.status(403).json({ error: 'This project was not offered to you.' });
+  } else if (req.user.role !== 'admin') return res.status(403).json({ error: 'Not allowed.' });
+  const busy = p.contractor_id ? await db.prepare(
+    `SELECT id, scheduled_start, arrival_window FROM projects WHERE contractor_id = ? AND id <> ? AND stage IN ('assigned','scheduled','in_progress') AND scheduled_start IS NOT NULL ORDER BY scheduled_start LIMIT 60`
+  ).all(p.contractor_id, p.id) : [];
+  res.json({
+    windows: offers.ARRIVAL_WINDOWS, max_days: offers.BOOK_MAX_DAYS,
+    preference: await offers.preferenceFor(p.id),
+    busy: busy.map((b) => ({ project_id: b.id, day: String(b.scheduled_start).slice(0, 10), window: b.arrival_window })),
+  });
 }));
 
 // ---- Negotiation (CaliFix-style): contractor counter-offers the offered budget ----

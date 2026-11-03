@@ -1100,7 +1100,13 @@
     async function expandAdminJob(job, body) {
       body.innerHTML = '<p class="muted">Loading…</p>';
       try {
-        const quotes = await HP.api('GET', `/quotes?job_request_id=${job.id}`).catch(() => []);
+        const [quotes, est, rules] = await Promise.all([
+          HP.api('GET', `/quotes?job_request_id=${job.id}`).catch(() => []),
+          HP.api('GET', `/jobs/${job.id}/estimate/latest`).catch(() => null),
+          HP.api('GET', '/admin/settings').catch(() => null),
+        ]);
+        // Corte 7: the deposit % is the global business rule (the per-quote field was ignored since Corte 2).
+        const depPct = rules && rules.rules ? (rules.rules.find((r) => r.key === 'deposit_pct') || {}).value : null;
         body.innerHTML = `
           <dl class="kv">
             <dt>Contact</dt><dd>${HP.esc(job.name || '')} · ${HP.esc(job.phone || '')} ${job.email ? '· ' + HP.esc(job.email) : ''}</dd>
@@ -1119,8 +1125,9 @@
               <div class="field"><label for="q-cost-${job.id}">Contractor cost ($) <span class="req">*</span></label>
                 <input type="number" id="q-cost-${job.id}" name="cost" min="0" step="0.01" placeholder="600.00"><span class="field-error" data-error-for="contractor_cost_cents"></span></div>
             </div>
-            <div class="field"><label for="q-dep-${job.id}">Deposit %</label>
-              <input type="number" id="q-dep-${job.id}" name="deposit_pct" min="0" max="100" value="30" style="max-width:140px"><span class="field-error" data-error-for="deposit_pct"></span></div>
+            ${est ? `<div class="banner banner-info small" style="margin:0 0 .75rem">Estimate: <strong>${HP.fmtMoney(est.low_cents)} – ${HP.fmtMoney(est.high_cents)}</strong> (confidence ${est.confidence}%).
+              <button class="btn btn-outline btn-sm" type="button" data-use-mid="${Math.round((Number(est.low_cents) + Number(est.high_cents)) / 2)}">Use the midpoint as the price</button></div>` : ''}
+            <p class="small muted" style="margin:.2rem 0 .6rem">Deposit: <strong>${depPct != null ? depPct + '%' : 'the global %'}</strong> of the price, charged when the customer accepts (Setup › Business rules).</p>
             <div class="small muted" data-margin></div>
             <div class="btn-row"><button class="btn btn-dark btn-sm" type="submit">Create quote</button></div>
           </form>`;
@@ -1134,6 +1141,8 @@
             marginBox.textContent = `Margin: $${m.toFixed(2)} (${pct}%) on $${p.toFixed(2)}.`;
           } else marginBox.textContent = '';
         };
+        const mid = form.querySelector('[data-use-mid]');
+        if (mid) mid.addEventListener('click', () => { form.price.value = (Number(mid.dataset.useMid) / 100).toFixed(2); preview(); form.cost.focus(); });
         form.price.addEventListener('input', preview);
         form.cost.addEventListener('input', preview);
         form.addEventListener('submit', (ev) => createQuote(ev, job, body));
@@ -1158,19 +1167,17 @@
       ev.preventDefault();
       const form = ev.target;
       HP.clearFieldErrors(form);
-      const price = form.price.value, cost = form.cost.value, dep = form.deposit_pct.value;
+      const price = form.price.value, cost = form.cost.value;
       const errors = {};
       if (!(Number(price) > 0)) errors.customer_price_cents = 'Enter a valid price in dollars.';
       if (!(Number(cost) >= 0)) errors.contractor_cost_cents = 'Enter a valid cost in dollars.';
       if (Number(cost) > Number(price)) errors.contractor_cost_cents = 'Cost cannot exceed the price (negative margin).';
-      if (dep !== '' && !(Number(dep) >= 0 && Number(dep) <= 100)) errors.deposit_pct = 'Deposit % must be 0–100.';
       if (Object.keys(errors).length) { HP.applyFieldErrors(form, errors); return; }
       try {
         await HP.api('POST', '/quotes', {
           job_request_id: job.id,
           customer_price_cents: toCents(price),
           contractor_cost_cents: toCents(cost),
-          deposit_pct: dep === '' ? 30 : Number(dep),
         });
         HP.toast('Quote created as a draft.', 'ok');
         expandAdminJob(job, body);

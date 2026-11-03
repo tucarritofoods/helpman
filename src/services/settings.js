@@ -58,6 +58,20 @@ const RULES = {
     default: () => 3,
     help: 'One friendly reminder if the customer has not left a review since confirming.',
   },
+  deposit_reminder_hours: {
+    group: 'timing',
+    label: 'Remind the customer to pay the deposit after (hours)',
+    type: 'int', min: 1, max: 168,
+    default: () => 24,
+    help: 'Counted from when the customer accepted the quote. One reminder; nothing is charged by it.',
+  },
+  deposit_escalate_hours: {
+    group: 'timing',
+    label: 'Tell support the deposit is still unpaid after (hours)',
+    type: 'int', min: 2, max: 336,
+    default: () => 72,
+    help: 'Support gets an email to call the customer. Must be later than the deposit reminder.',
+  },
   client_lost_after_days: {
     group: 'timing',
     label: 'A prospect counts as "lost" after (days without activity)',
@@ -119,6 +133,9 @@ async function update(values, userId) {
   const remind = ok.confirm_reminder_hours !== undefined ? ok.confirm_reminder_hours : await get('confirm_reminder_hours');
   const escalate = ok.confirm_escalate_hours !== undefined ? ok.confirm_escalate_hours : await get('confirm_escalate_hours');
   if (escalate <= remind) return { errors: { confirm_escalate_hours: 'Must be later than the customer reminder.' } };
+  const dRemind = ok.deposit_reminder_hours !== undefined ? ok.deposit_reminder_hours : await get('deposit_reminder_hours');
+  const dEscalate = ok.deposit_escalate_hours !== undefined ? ok.deposit_escalate_hours : await get('deposit_escalate_hours');
+  if (dEscalate <= dRemind) return { errors: { deposit_escalate_hours: 'Must be later than the deposit reminder.' } };
   for (const [k, v] of Object.entries(ok)) {
     // Explicit RETURNING: the pg adapter adds "RETURNING id" otherwise, and this table has no id.
     const sql = db._isPg

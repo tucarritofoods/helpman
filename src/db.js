@@ -902,6 +902,12 @@ for (const [col, type] of [['delivered_at', 'TEXT'], ['opened_at', 'TEXT'], ['cl
 }
 db.exec(`CREATE INDEX IF NOT EXISTS idx_outbox_campaign ON email_outbox(campaign_id)`);
 
+// ---- Corte 7: automatic deposit reminder bookkeeping ----
+// Mirrored for PostgreSQL in src/db/migrations/017_process.sql.
+for (const col of ['deposit_reminder_sent_at', 'deposit_escalated_at']) {
+  if (!columnExists('projects', col)) db.exec(`ALTER TABLE projects ADD COLUMN ${col} TEXT`);
+}
+
 // ---- Migrate payments.provider CHECK to include 'stripe' (was manual/stripe_stub) ----
 // Also adds 'paid' to the status CHECK for Stripe-confirmed payments.
 // 2026-10-07: also adds 'simulated' provider for the test payment mode.

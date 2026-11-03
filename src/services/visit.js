@@ -306,6 +306,39 @@ async function runLifecycleEmails({ now = new Date() } = {}) {
       }
     }
   }
+  // Corte 7: quote accepted but the deposit is not in — one reminder to the customer, then support.
+  // (Before, nobody was told unless someone opened Collections.) Nothing is charged here.
+  const depRemindH = await settings.get('deposit_reminder_hours');
+  const depEscalateH = Math.max(depRemindH + 1, await settings.get('deposit_escalate_hours'));
+  const unpaid = await db.prepare(
+    `SELECT p.id, p.created_at, p.deposit_reminder_sent_at, p.deposit_escalated_at, q.responded_at, q.deposit_cents
+       FROM projects p LEFT JOIN quotes q ON q.id = p.quote_id
+      WHERE p.stage = 'assigned'
+        AND NOT EXISTS (SELECT 1 FROM payments x WHERE x.project_id = p.id AND x.kind = 'deposit' AND x.status IN ('paid','recorded'))`
+  ).all();
+  out.deposit_reminders = 0; out.deposit_escalations = 0;
+  for (const p of unpaid) {
+    const since = p.responded_at || p.created_at;
+    if (age(since) >= depRemindH * H && !p.deposit_reminder_sent_at) {
+      const c = await db.prepare('UPDATE projects SET deposit_reminder_sent_at = CURRENT_TIMESTAMP WHERE id = ? AND deposit_reminder_sent_at IS NULL').run(p.id);
+      if (c.changes === 1) {
+        const pt = await parties(p.id);
+        const { shell } = require('./notify');
+        await emailCustomer(pt, `Your visit is waiting for the deposit — project #${p.id}`,
+          shell('One step left to book your visit', `Hi ${custFirst(pt)}, you accepted the quote for your ${pt.job.service_type} project. Pay the deposit from your portal and we assign your pro right away.`,
+            [['Project', `#${p.id} — ${pt.job.service_type}`], ...(p.deposit_cents ? [['Deposit', money(p.deposit_cents)]] : []), ['Portal', `${require('./magiclink').baseUrl()}/customer.html#projects`]]));
+        out.deposit_reminders++;
+      }
+    }
+    if (age(since) >= depEscalateH * H && !p.deposit_escalated_at) {
+      const c = await db.prepare('UPDATE projects SET deposit_escalated_at = CURRENT_TIMESTAMP WHERE id = ? AND deposit_escalated_at IS NULL').run(p.id);
+      if (c.changes === 1) {
+        await emailAdmins(`Deposit still unpaid — project #${p.id}`, `The customer accepted the quote ${depEscalateH} hours ago and has not paid the deposit (one reminder was sent). Please call them from the client profile.`, [['Project', `#${p.id}`]]);
+        out.deposit_escalations++;
+      }
+    }
+  }
+
   // Completed, no review after 3 days: one friendly reminder.
   const noReview = await db.prepare(
     `SELECT p.id, s.signed_at FROM projects p JOIN completion_sheets s ON s.project_id = p.id

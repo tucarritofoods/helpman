@@ -30,6 +30,9 @@ router.get('/offers/:token', ah(async (req, res) => {
     description: require('../services/views').redactContacts((job.description || '').slice(0, 300)),
     contractor_name: cont ? cont.name : '',
     expires_at: project.offer_expires_at,
+    // Corte 7: book the visit while accepting.
+    windows: offers.ARRIVAL_WINDOWS, max_days: offers.BOOK_MAX_DAYS,
+    preference: await offers.preferenceFor(project.id),
   });
 }));
 
@@ -48,11 +51,14 @@ router.post('/offers/:token/respond', ah(async (req, res) => {
   if ((req.body || {}).terms_accepted !== true) {
     return res.status(400).json({ error: 'You must accept the Independent Contractor Terms to take this job.' });
   }
+  const v = await offers.validateVisit(project, req.body || {});
+  if (v.errors) return res.status(422).json({ errors: v.errors });
   const crow = await db.prepare('SELECT user_id FROM contractors WHERE id = ?').get(project.contractor_id);
-  const out = await offers.acceptOffer(project, { userId: crow && crow.user_id, ip: req.ip || null });
+  let out = await offers.acceptOffer(project, { userId: crow && crow.user_id, ip: req.ip || null, booking: !!v.visit });
+  if (v.visit) out = await offers.bookVisitByPro(project, v.visit, { userId: crow && crow.user_id });
   // A magic-link caller is the contractor: answer with the contractor's view only
   // (never the customer price), like the portal does.
-  res.json({ accepted: true, project: require('../services/views').projectForContractor(out) });
+  res.json({ accepted: true, booked: !!v.visit, project: require('../services/views').projectForContractor(out) });
 }));
 
 // Public summary for the schedule-confirmation page (same offer.html).

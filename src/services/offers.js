@@ -75,7 +75,7 @@ async function partiesFor(p) {
 }
 
 // ---- Accept a job offer (portal or magic link) ----
-async function acceptOffer(p, { userId, ip }) {
+async function acceptOffer(p, { userId, ip, booking }) {
   const { job, cust, cont } = await partiesFor(p);
   await db.prepare(
     `UPDATE projects SET contractor_status = 'accepted', stage = 'scheduled', offer_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
@@ -86,8 +86,8 @@ async function acceptOffer(p, { userId, ip }) {
   await auditLog(userId, 'project.contractor_accepted', 'projects', p.id, `Contractor accepted under terms v${CONTRACTOR_TERMS_VERSION}`);
   await touchInteraction(p.job_request_id, 'contractor_reply', 'offer accepted');
 
-  // Contractor: accepted — now waiting for the day to be confirmed.
-  if (cont && cont.user_email) {
+  // Contractor: accepted — now waiting for the day to be confirmed (unless they booked it themselves).
+  if (cont && cont.user_email && !booking) {
     await notify({
       to: cont.user_email,
       subject: `Offer accepted — project #${p.id} (waiting for day confirmation)`,
@@ -206,7 +206,87 @@ async function sendScheduleConfirmation(p) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Corte 7: the pro books the visit when accepting the offer.
+// Before, after the pro accepted, dispatch picked a date by hand and the pro then had to
+// confirm or decline it by email — three steps and two people for one date, and the
+// project sat in "waiting for a date" in between. Now the pro picks the day and the
+// arrival window from the customer's preference while accepting; the visit is booked at
+// once (the pro chose it, so there is nothing left to confirm) and the customer is told.
+// Dispatch can still move it from Agenda (the old confirm-by-email flow stays for that).
+// ---------------------------------------------------------------------------
+const ARRIVAL_WINDOWS = ['8:00 AM – 10:00 AM', '10:00 AM – 12:00 PM', '12:00 PM – 2:00 PM', '2:00 PM – 4:00 PM', '4:00 PM – 6:00 PM'];
+const BOOK_MAX_DAYS = 30;
+
+function isoDay(d) { return d.toISOString().slice(0, 10); }
+
+// { date, window } from the request → { visit } or { error }. Optional: both missing = no booking.
+async function validateVisit(p, b) {
+  const date = b && b.visit_date ? String(b.visit_date).slice(0, 10) : '';
+  const win = b && b.arrival_window ? String(b.arrival_window) : '';
+  if (!date && !win) return { visit: null };
+  const errors = {};
+  const today = isoDay(new Date());
+  const max = isoDay(new Date(Date.now() + BOOK_MAX_DAYS * 86400000));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || isNaN(new Date(date + 'T12:00:00Z').getTime())) errors.visit_date = 'Choose the visit day.';
+  else if (date <= today) errors.visit_date = 'The visit must be from tomorrow on.';
+  else if (date > max) errors.visit_date = `Choose a day within the next ${BOOK_MAX_DAYS} days.`;
+  if (!ARRIVAL_WINDOWS.includes(win)) errors.arrival_window = 'Choose an arrival window.';
+  if (Object.keys(errors).length) return { errors };
+  // The same pro cannot be in two places in the same window.
+  const clash = await db.prepare(
+    `SELECT id FROM projects WHERE contractor_id = ? AND id <> ? AND stage IN ('assigned','scheduled','in_progress')
+       AND SUBSTR(CAST(scheduled_start AS TEXT), 1, 10) = ? AND arrival_window = ?`
+  ).get(p.contractor_id, p.id, date, win);
+  if (clash) return { errors: { arrival_window: `You already have a visit (#${clash.id}) that day in this window. Pick another time.` } };
+  return { visit: { date, window: win } };
+}
+
+async function bookVisitByPro(p, visit, { userId }) {
+  await db.prepare(
+    `UPDATE projects SET scheduled_start = ?, scheduled_end = ?, arrival_window = ?, schedule_status = 'confirmed',
+            schedule_token = NULL, schedule_expires_at = NULL, reminder_sent_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+  ).run(visit.date, visit.date, visit.window, p.id);
+  await auditLog(userId || null, 'project.visit_booked_by_pro', 'projects', p.id, `${visit.date} ${visit.window}`);
+  const fresh = await db.prepare('SELECT * FROM projects WHERE id = ?').get(p.id);
+  const { job, cust, cont } = await partiesFor(fresh);
+  if (cust && cust.email) {
+    await notify({
+      to: cust.email,
+      subject: `Your visit is scheduled — ${prettyDay(visit.date)} (#${p.id})`,
+      html: scheduleConfirmedCustomer({
+        customerName: String(cust.name || 'there').split(' ')[0],
+        techName: cont ? displayName(cont.user_name) : 'Your pro',
+        photoUrl: cont ? contractorPhotoUrl(cont) : null,
+        projectId: p.id, day: visit.date, window: visit.window,
+      }),
+    }).catch(() => {});
+  }
+  const sms = require('./sms');
+  await sms.textCustomer(p.id, 'scheduled', sms.T.scheduled(job ? job.service_type : 'service', visit.date)).catch(() => {});
+  if (cont && cont.user_email) {
+    const { shell } = require('./notify');
+    await notify({
+      to: cont.user_email,
+      subject: `Visit booked — ${prettyDay(visit.date)} (#${p.id})`,
+      html: shell('Your visit is booked', `Hi ${String(cont.user_name).split(' ')[0]}, the customer has been told. Arrive within the window; you will get a reminder the day before.`, [
+        ['Job', `#${p.id} — ${job ? job.service_type : ''}`], ['Day', prettyDay(visit.date)], ['Arrival window', visit.window],
+        ['Address', job ? [job.address, job.city, job.zip].filter(Boolean).join(', ') : ''],
+      ]),
+    }).catch(() => {});
+  }
+  return fresh;
+}
+
+// What the pro sees about the customer's timing wishes (notes cleaned of contact details).
+async function preferenceFor(projectId) {
+  const r = await db.prepare('SELECT preferred_date, time_window, flexibility, notes FROM project_schedule_preferences WHERE project_id = ?').get(projectId);
+  if (!r) return null;
+  return { preferred_date: r.preferred_date, time_window: r.time_window, flexibility: r.flexibility, notes: r.notes ? require('./views').redactContacts(String(r.notes)) : null };
+}
+
 module.exports = {
+  ARRIVAL_WINDOWS, BOOK_MAX_DAYS, validateVisit, bookVisitByPro, preferenceFor,
   offerLinks, scheduleLinks, releaseExpiredOffers,
   acceptOffer, declineOffer, loadByToken, respondToSchedule, sendScheduleConfirmation,
   OFFER_TTL_MS, SCHEDULE_TTL_MS,

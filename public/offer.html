@@ -56,6 +56,7 @@
         <dt>Details</dt><dd>${esc(s.description || '—')}</dd>
       </dl>
       <p class="offer-meta">This offer expires ${esc((s.expires_at || '').slice(0, 16).replace('T', ' '))}.</p>
+      ${s.windows ? bookingFields(s) : ''}
       <label class="offer-terms"><input type="checkbox" id="terms" style="margin-top:.2rem">
         <span class="small">I accept the <a href="contractor-terms.html" target="_blank" rel="noopener">Independent Contractor Terms</a> for this job. Required to accept.</span></label>
       <div class="btn-row">
@@ -67,6 +68,23 @@
     document.getElementById('b-ok').onclick = () => respond('offers', offerToken, true);
     document.getElementById('b-no').onclick = () => respond('offers', offerToken, false);
   }
+
+  // Corte 7: book the visit (day + arrival window) while accepting.
+  const WIN = { morning: 'mornings', afternoon: 'afternoons', evening: 'evenings', anytime: 'any time' };
+  function bookingFields(s) {
+    const d = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+    const p = s.preference;
+    const sug = p && p.preferred_date && p.preferred_date > d(0) && p.preferred_date <= d(s.max_days) ? p.preferred_date : d(1);
+    return `<div class="card" style="padding:.9rem 1rem;margin:1rem 0">
+      <label style="font-weight:700;display:flex;gap:.5rem;align-items:center"><input type="checkbox" id="bk-now" checked> Book the visit now</label>
+      <p class="small muted" style="margin:.35rem 0">Customer's preference: <strong>${p ? `${p.preferred_date ? 'around ' + esc(p.preferred_date) : 'no specific day'}, ${esc(WIN[p.time_window] || 'any time')}${p.notes ? ' — “' + esc(p.notes) + '”' : ''}` : 'none given'}</strong></p>
+      <div id="bk-fields" class="form-grid two">
+        <div class="field"><label for="bk-date">Visit day</label><input type="date" id="bk-date" min="${d(1)}" max="${d(s.max_days)}" value="${sug}"></div>
+        <div class="field"><label for="bk-window">Arrival window</label><select id="bk-window">${s.windows.map((w) => `<option>${esc(w)}</option>`).join('')}</select></div>
+      </div>
+      <p class="small muted" style="margin:0">Untick to let dispatch set the day instead.</p></div>`;
+  }
+  document.addEventListener('change', (e) => { if (e.target && e.target.id === 'bk-now') document.getElementById('bk-fields').hidden = !e.target.checked; });
 
   function renderSchedule(s) {
     app.innerHTML = `<div class="card">
@@ -94,15 +112,18 @@
     const ok = document.getElementById('b-ok'), no = document.getElementById('b-no');
     HP.busy(ok, true, 'Sending…'); HP.busy(no, true, '');
     try {
-      const r = await HP.api('POST', `/${kind}/${encodeURIComponent(token)}/respond`,
-        accept ? { accept: true, terms_accepted: kind === 'offers' ? true : undefined } : { accept: false });
+      const body = accept ? { accept: true, terms_accepted: kind === 'offers' ? true : undefined } : { accept: false };
+      const now = document.getElementById('bk-now');
+      if (kind === 'offers' && accept && now && now.checked) { body.visit_date = document.getElementById('bk-date').value; body.arrival_window = document.getElementById('bk-window').value; }
+      const r = await HP.api('POST', `/${kind}/${encodeURIComponent(token)}/respond`, body);
       msg.className = 'ok';
       msg.textContent = kind === 'offers'
-        ? (r.accepted ? '✔ Offer accepted! The job is now waiting for the day to be confirmed — watch your email.' : 'Offer declined. Dispatch has been notified.')
+        ? (r.accepted ? (r.booked ? '✔ Offer accepted and visit booked. The customer has been told; the address is in your email.' : '✔ Offer accepted! Dispatch will set the day — watch your email.') : 'Offer declined. Dispatch has been notified.')
         : (r.confirmed ? '✔ Schedule confirmed. See you then!' : 'Understood — dispatch has been notified to pick a new day.');
       ok.style.display = no.style.display = 'none';
       const t = document.getElementById('terms'); if (t) t.closest('.offer-terms').style.display = 'none';
-    } catch (e) { msg.className = 'err'; msg.textContent = HP.friendlyMessage(e); HP.busy(ok, false); HP.busy(no, false); }
+      const bk = document.getElementById('bk-fields'); if (bk) bk.closest('.card').style.display = 'none';
+    } catch (e) { msg.className = 'err'; msg.textContent = e.fields ? Object.values(e.fields)[0] : HP.friendlyMessage(e); HP.busy(ok, false); HP.busy(no, false); }
   }
 
   load();

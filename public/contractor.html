@@ -107,6 +107,7 @@
       </div>
       <div class="modal-body">
         <div id="offer-summary"></div>
+        <div id="offer-booking"></div>
         <label class="terms-check">
           <input type="checkbox" id="offer-terms-check">
           <span>I have read and accept the <a href="contractor-terms.html" target="_blank" rel="noopener">Independent Contractor Terms</a> <span class="muted" id="offer-terms-ver"></span> for this job.</span>
@@ -640,9 +641,35 @@
       chk.checked = false;
       document.getElementById('offer-terms-btn').disabled = true;
       document.getElementById('offer-terms-ver').textContent = ver ? `(v${ver})` : '';
+      // Corte 7: pick the visit day + window now (the customer is told at once).
+      const bk = document.getElementById('offer-booking');
+      bk.innerHTML = '';
+      try {
+        const o = await HP.api('GET', `/projects/${projectId}/booking-options`);
+        bk.innerHTML = bookingFields(o);
+      } catch (e) { bk.innerHTML = ''; }
       document.getElementById('offer-modal').hidden = false;
       document.body.style.overflow = 'hidden';
     }
+    const WIN_LABEL = { morning: 'mornings', afternoon: 'afternoons', evening: 'evenings', anytime: 'any time' };
+    const FLEX_LABEL = { exact: 'that exact day', plus_minus_1: 'give or take 1 day', plus_minus_3: 'give or take 3 days', flexible: 'flexible' };
+    function bookingFields(o) {
+      const d = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+      const pref = o.preference;
+      const prefTxt = pref ? `${pref.preferred_date ? 'around ' + HP.fmtDate(pref.preferred_date) : 'no specific day'}, ${WIN_LABEL[pref.time_window] || 'any time'}, ${FLEX_LABEL[pref.flexibility] || ''}${pref.notes ? ' — “' + HP.esc(pref.notes) + '”' : ''}` : 'no preference given';
+      const suggested = pref && pref.preferred_date && pref.preferred_date > d(0) && pref.preferred_date <= d(o.max_days) ? pref.preferred_date : d(1);
+      const busy = (o.busy || []).filter((b) => b.day >= d(0)).slice(0, 8);
+      return `<div class="card" style="padding:.9rem 1rem;margin:.75rem 0">
+        <label class="field-check" style="font-weight:700"><input type="checkbox" id="bk-now" checked> Book the visit now</label>
+        <p class="small muted" style="margin:.35rem 0">Customer's preference: <strong>${HP.esc(prefTxt)}</strong></p>
+        <div class="form-grid two" id="bk-fields">
+          <div class="field"><label for="bk-date">Visit day</label><input type="date" id="bk-date" min="${d(1)}" max="${d(o.max_days)}" value="${suggested}"><span class="field-error" data-error-for="visit_date"></span></div>
+          <div class="field"><label for="bk-window">Arrival window</label><select id="bk-window">${o.windows.map((w) => `<option>${HP.esc(w)}</option>`).join('')}</select><span class="field-error" data-error-for="arrival_window"></span></div>
+        </div>
+        ${busy.length ? `<p class="small muted" style="margin:0">Your other visits: ${busy.map((b) => `${HP.fmtDate(b.day)} ${HP.esc(b.window || '')}`).join(' · ')}</p>` : ''}
+        <p class="small muted" style="margin:.35rem 0 0">Untick to let dispatch set the day instead.</p></div>`;
+    }
+    document.addEventListener('change', (e) => { if (e.target && e.target.id === 'bk-now') document.getElementById('bk-fields').hidden = !e.target.checked; });
     function closeOfferModal() {
       document.getElementById('offer-modal').hidden = true;
       document.body.style.overflow = '';
@@ -663,11 +690,14 @@
       const btn = document.getElementById('offer-terms-btn');
       HP.busy(btn, true, 'Accepting…');
       try {
-        await HP.api('POST', `/projects/${offerProjectId}/contractor-respond`, { accept: true, terms_accepted: true });
+        const body = { accept: true, terms_accepted: true };
+        const bd = document.getElementById('bk-date'), bw = document.getElementById('bk-window'), now = document.getElementById('bk-now');
+        if (bd && now && now.checked) { body.visit_date = bd.value; body.arrival_window = bw.value; }
+        const r = await HP.api('POST', `/projects/${offerProjectId}/contractor-respond`, body);
         closeOfferModal();
-        HP.toast('Job accepted — good luck!', 'ok');
+        HP.toast(r.booked ? 'Job accepted and visit booked — the customer has been told.' : 'Job accepted — dispatch will set the day.', 'ok');
         loadJobs();
-      } catch (e) { HP.toast(HP.friendlyMessage(e), 'error'); }
+      } catch (e) { const bk = document.getElementById('offer-booking'); if (e.fields && bk) HP.applyFieldErrors(bk, e.fields); HP.toast(e.fields ? Object.values(e.fields)[0] : HP.friendlyMessage(e), 'error'); }
       finally { HP.busy(btn, false); }
     });
 
