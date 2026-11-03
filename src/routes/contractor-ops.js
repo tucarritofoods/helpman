@@ -167,6 +167,55 @@ router.post('/documents', authRequired, requireRole('contractor'), upload.single
   res.status(201).json(await db.prepare('SELECT * FROM contractor_documents WHERE id=?').get(info.lastInsertRowid));
 }));
 
+// ---- Pro payout account (Stripe Connect Express) ----
+// The pro sets up where Helpman sends their money; Stripe collects the bank and
+// identity details (Helpman never sees them).
+router.get('/payout-account', authRequired, requireRole('contractor'), ah(async (req,res)=>{
+  const c=await me(req,res); if(!c)return;
+  const stripeSvc=require('../services/stripe');
+  let live=null;
+  if(stripeSvc.isEnabled() && c.stripe_account_id){
+    try{ live=await stripeSvc.syncAccount(await stripeSvc.getClient().accounts.retrieve(c.stripe_account_id)); }catch(e){ live=null; }
+  }
+  const row=await db.prepare('SELECT stripe_account_id,payouts_enabled,payout_details_submitted,payout_requirements,provider_type FROM contractors WHERE id=?').get(c.id);
+  res.json({
+    available: stripeSvc.isEnabled(),
+    payroll: row.provider_type==='employee',
+    connected: !!row.stripe_account_id,
+    payouts_enabled: !!row.payouts_enabled,
+    details_submitted: !!row.payout_details_submitted,
+    currently_due: row.payout_requirements ? JSON.parse(row.payout_requirements) : [],
+    refreshed: !!live,
+  });
+}));
+
+router.post('/payout-account/link', authRequired, requireRole('contractor'), ah(async (req,res)=>{
+  const c=await me(req,res); if(!c)return;
+  const stripeSvc=require('../services/stripe');
+  if(!stripeSvc.isEnabled()) return res.status(503).json({error:'Payouts are not enabled yet. Helpman will let you know.'});
+  if(c.provider_type==='employee') return res.status(409).json({error:'Company technicians are paid through payroll.'});
+  const client=stripeSvc.getClient();
+  const u=await db.prepare('SELECT email FROM users WHERE id=?').get(req.user.id);
+  let acct=c.stripe_account_id;
+  if(!acct){
+    const a=await client.accounts.create({
+      type:'express', country:'US', email:u.email,
+      capabilities:{ transfers:{ requested:true } },
+      metadata:{ contractor_id:String(c.id), platform:'helpman' },
+    },{ idempotencyKey:`connect-account-${c.id}` });
+    acct=a.id;
+    await db.prepare('UPDATE contractors SET stripe_account_id=? WHERE id=? AND stripe_account_id IS NULL').run(acct,c.id);
+    acct=(await db.prepare('SELECT stripe_account_id FROM contractors WHERE id=?').get(c.id)).stripe_account_id;
+    await auditLog(req.user.id,'contractor.payout_account_created','contractors',c.id,acct);
+  }
+  const base=require('../services/magiclink').baseUrl();
+  const link=await client.accountLinks.create({
+    account:acct, type:'account_onboarding',
+    refresh_url:`${base}/contractor.html?payout=refresh`, return_url:`${base}/contractor.html?payout=done`,
+  });
+  res.json({ url:link.url, expires_at:link.expires_at||null });
+}));
+
 router.get('/payouts', authRequired, requireRole('contractor'), ah(async (req,res)=>{
   const c=await me(req,res); if(!c)return;
   res.json(await db.prepare('SELECT * FROM contractor_payables WHERE contractor_id=? ORDER BY id DESC').all(c.id));

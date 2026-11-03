@@ -168,18 +168,22 @@ const SECRET_KEYS = new Set([
   'password_hash', 'reset_token', 'reset_expires', 'verify_token', 'verify_expires',
   'totp_secret', 'totp_secret_enc', 'totp_recovery', 'totp_recovery_json', 'recovery_codes',
   'token_version', 'schedule_token', 'stripe_secret', 'signer_ip',
+  'stripe_customer_id', 'payment_method_id',
 ]);
 // Never sent to a contractor: the customer's money, identity and location.
 const CONTRACTOR_HIDDEN = new Set([
   'customer_price_cents', 'deposit_cents', 'deposit_pct', 'price_delta_cents', 'margin_cents', 'margin_note',
   'amount_cents', 'refund_cents', 'customer_id', 'customer_note', 'claim_token', 'lat', 'lng',
   'customer_email', 'customer_phone', 'customer_name', 'customer_address',
+  'balance_charge_status', 'balance_charge_error', 'balance_charge_attempts', 'cancellation_kind',
 ]);
 // Never sent to a customer: what Helpman pays the pro, and the pro's identity documents.
 const CUSTOMER_HIDDEN = new Set([
   'contractor_cost_cents', 'payable_cents', 'margin_cents', 'margin_note', 'proposed_cents',
   'legal_name', 'license_number', 'insurance_info', 'contractor_email', 'contractor_phone',
   'user_email', 'user_phone', 'service_base', 'service_radius_miles',
+  'contractor_cost_delta_cents', 'stripe_account_id', 'payouts_enabled', 'payout_details_submitted',
+  'payout_requirements', 'transfer_id', 'reversed_cents',
 ]);
 const CONTACT_KEYS = new Set(['email', 'phone', 'to_email', 'to_phone']);
 const CONTRACTOR_MARKERS = ['contractor_kind', 'legal_name', 'license_number', 'rating_avg', 'jobs_completed', 'provider_type'];

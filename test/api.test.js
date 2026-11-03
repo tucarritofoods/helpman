@@ -3,6 +3,7 @@
 // the mailer runs in console/log mode and every notification is recorded
 // in email_log, which is exactly what the assertions check.
 const { test, before, after } = require('node:test');
+after(async () => { const s = await require('../server').listening; if (s) { s.closeAllConnections && s.closeAllConnections(); s.close(); } });
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
@@ -20,6 +21,8 @@ process.env.JWT_SECRET = 'test-secret-for-automated-tests-only';
 // The suite signs in far more than 20 times from one IP: raise the limiter (it stays ON, so its headers are still tested).
 process.env.AUTH_RATE_LIMIT_MAX = '5000';
 process.env.INTAKE_RATE_LIMIT_MAX = '5000';
+// Without Stripe, the suite's flows use the dev pilot behavior (deposit recorded on acceptance).
+process.env.DEV_AUTORECORD_DEPOSIT = 'true';
 
 const db = require('../src/db');
 
@@ -883,6 +886,7 @@ function makeFakeStripe() {
   const refunded = (id) => refunds.filter(r => r.payment_intent === id).reduce((a, r) => a + r.amount, 0);
   return {
     state, intents, refundLog: refunds,
+    customers: { create: async (p) => ({ id: `cus_fake_${++FAKE_STRIPE_SEQ}`, email: p.email }) },
     paymentIntents: {
       create: async (p) => { const id = `pi_fake_${++FAKE_STRIPE_SEQ}`; const pi = { id, client_secret: `${id}_secret`, amount: p.amount, amount_received: 0, metadata: p.metadata, status: 'requires_payment_method' }; intents.set(id, pi); return pi; },
       cancel: async (id) => { intents.get(id).status = 'canceled'; return intents.get(id); },
@@ -936,13 +940,13 @@ test('REGRESSION: Stripe deposit — amount comes from the quote, the webhook is
 
   // intent: only the owner, verified, and the amount is the quote's 30% (the client cannot choose it)
   assert.equal((await api('POST', '/api/payments/deposit-intent', { project_id: pid, amount_cents: 1 }, contToken)).status, 403);
-  const intent = await api('POST', '/api/payments/deposit-intent', { project_id: pid, amount_cents: 1 }, custToken);
+  const intent = await api('POST', '/api/payments/deposit-intent', { project_id: pid, amount_cents: 1, authorize_balance: true }, custToken);
   assert.equal(intent.status, 201);
   assert.equal(intent.data.amount_cents, 15000, 'amount is derived from the quote, not from the request');
   assert.equal(fake.intents.get(intent.data.payment_intent_id).amount, 15000);
   assert.ok(intent.data.client_secret);
   // a second intent supersedes the first (ledger stays clean)
-  const intent2 = await api('POST', '/api/payments/deposit-intent', { project_id: pid }, custToken);
+  const intent2 = await api('POST', '/api/payments/deposit-intent', { project_id: pid, authorize_balance: true }, custToken);
   assert.equal(fake.intents.get(intent.data.payment_intent_id).status, 'canceled');
   const rows = (await api('GET', `/api/payments?project_id=${pid}`, undefined, adminToken)).data;
   assert.equal(rows.find(r => r.provider_ref === intent.data.payment_intent_id).status, 'failed');
@@ -968,7 +972,7 @@ test('REGRESSION: Stripe deposit — amount comes from the quote, the webhook is
   assert.equal(await jobStatus(), 'assigned', 'a replayed event does not move the job backwards');
   assert.equal(Number((await db.prepare("SELECT COUNT(*) c FROM payments WHERE project_id = ? AND kind = 'deposit' AND status = 'paid'").get(pid)).c), 1);
   // already paid: no new intent
-  assert.equal((await api('POST', '/api/payments/deposit-intent', { project_id: pid }, custToken)).status, 409);
+  assert.equal((await api('POST', '/api/payments/deposit-intent', { project_id: pid, authorize_balance: true }, custToken)).status, 409);
   // the confirmation is logged ONCE (the replay above must not duplicate it)
   const paidEvents = await db.prepare("SELECT * FROM events WHERE type = 'payment.paid' AND entity = 'payment' AND entity_id = ?").all(cur.id);
   assert.equal(paidEvents.length, 1, 'one payment.paid event, even after a replayed webhook');
@@ -976,7 +980,7 @@ test('REGRESSION: Stripe deposit — amount comes from the quote, the webhook is
 
   // a failed payment is recorded as failed
   const pid2 = await acceptWithStripe();
-  const i2 = await api('POST', '/api/payments/deposit-intent', { project_id: pid2 }, custToken);
+  const i2 = await api('POST', '/api/payments/deposit-intent', { project_id: pid2, authorize_balance: true }, custToken);
   assert.equal((await stripeWebhook('payment_intent.payment_failed', { id: i2.data.payment_intent_id, metadata: {} })).status, 200);
   assert.equal((await api('GET', `/api/payments?project_id=${pid2}`, undefined, adminToken)).data.find(r => r.provider_ref === i2.data.payment_intent_id).status, 'failed');
 }));
@@ -984,7 +988,7 @@ test('REGRESSION: Stripe deposit — amount comes from the quote, the webhook is
 test('REGRESSION: Stripe final balance — needs approved milestones, the signed sheet and no dispute; refunds are finance-only and capped', withFakeStripe(async (fake) => {
   // a project whose deposit was paid through Stripe, in progress with an accepted contractor
   const pid = await acceptWithStripe();
-  const dep = await api('POST', '/api/payments/deposit-intent', { project_id: pid }, custToken);
+  const dep = await api('POST', '/api/payments/deposit-intent', { project_id: pid, authorize_balance: true }, custToken);
   fake.pay(dep.data.payment_intent_id);
   await stripeWebhook('payment_intent.succeeded', { id: dep.data.payment_intent_id, amount_received: 15000, metadata: { project_id: String(pid), kind: 'deposit' } });
   assert.equal((await api('POST', `/api/projects/${pid}/assign`, { contractor_id: contractorId }, adminToken)).status, 200);
@@ -1041,7 +1045,7 @@ test('REGRESSION: Stripe final balance — needs approved milestones, the signed
 
 test('REGRESSION: dispute refund through Stripe — newest charge first, and a retry after a partial failure never refunds twice', withFakeStripe(async (fake) => {
   const pid = await acceptWithStripe();
-  const dep = await api('POST', '/api/payments/deposit-intent', { project_id: pid }, custToken);
+  const dep = await api('POST', '/api/payments/deposit-intent', { project_id: pid, authorize_balance: true }, custToken);
   fake.pay(dep.data.payment_intent_id);
   await stripeWebhook('payment_intent.succeeded', { id: dep.data.payment_intent_id, amount_received: 15000, metadata: { project_id: String(pid), kind: 'deposit' } });
   // a second Stripe charge on the same project (e.g. the final balance), recorded directly

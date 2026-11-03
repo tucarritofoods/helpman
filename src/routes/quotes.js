@@ -40,6 +40,10 @@ const MILESTONES = {
 };
 const GENERIC_MILESTONES = ['Preparation', 'Main work', 'Finishing and client review'];
 
+// Development/test only: without Stripe, record the deposit as received on
+// acceptance (the old pilot behavior). Never in production.
+const devAutoRecord = () => process.env.DEV_AUTORECORD_DEPOSIT === 'true' && process.env.NODE_ENV !== 'production';
+
 function jobVisibleTo(req, job) {
   if (req.user.role === 'admin') return true;
   return job.customer_id && job.customer_id === req.user.id;
@@ -53,8 +57,9 @@ router.post('/', authRequired, requireStaff('support'), ah(async (req, res) => {
   if (!job) errors.job_request_id = 'Job request not found.';
   if (!isInt(b.customer_price_cents, 100, 100000000)) errors.customer_price_cents = 'Customer price (cents) required.';
   if (!isInt(b.contractor_cost_cents, 0, 100000000)) errors.contractor_cost_cents = 'Contractor cost (cents) required.';
-  const depositPct = b.deposit_pct === undefined ? 30 : b.deposit_pct;
-  if (!isInt(depositPct, 0, 100)) errors.deposit_pct = 'Deposit % must be 0-100.';
+  // Owner's rule: ONE deposit % for every quote (admin > Setup > Business rules).
+  // A per-quote value is ignored; the response says which % applied.
+  const depositPct = await require('../services/billing').depositPct();
   if (b.customer_price_cents && b.contractor_cost_cents && b.contractor_cost_cents > b.customer_price_cents) {
     errors.contractor_cost_cents = 'Contractor cost cannot exceed the customer price (negative margin).';
   }
@@ -181,6 +186,9 @@ router.post('/:id/respond', authRequired, ah(async (req, res) => {
         // The deposit is collected via Stripe PaymentIntent (frontend drives it
         // right after this response). The webhook flips the job to
         // deposit_paid when the charge succeeds. Nothing is recorded yet.
+      } else if (!devAutoRecord()) {
+        // No Stripe: the deposit stays PENDING until finance records the money it
+        // actually received (Payments › record). Nothing is marked paid by itself.
       } else {
         // Bookkeeping: the deposit the platform collects (Stripe NOT configured).
         await t.prepare(
@@ -211,7 +219,7 @@ router.post('/:id/respond', authRequired, ah(async (req, res) => {
         ['Customer', `${job.name} (${job.phone})`],
         ['Quoted price', fmt(q.customer_price_cents)],
         ['Contractor budget', fmt(q.contractor_cost_cents)],
-        ['Deposit', stripeOn ? `${fmt(q.deposit_cents)} — collecting via Stripe` : `${fmt(q.deposit_cents)} — recorded manually`],
+        ['Deposit', stripeOn ? `${fmt(q.deposit_cents)} — collecting via Stripe` : devAutoRecord() ? `${fmt(q.deposit_cents)} — recorded manually (dev)` : `${fmt(q.deposit_cents)} — PENDING: record it in Payments once the money is in`],
       ]),
     }).catch(() => {});
   }
@@ -228,7 +236,7 @@ router.post('/:id/respond', authRequired, ah(async (req, res) => {
       html: quoteAcceptedCustomer(String(custEmail.name || job.name || 'there').split(' ')[0], projectId, job.service_type),
     }).catch(() => {});
   }
-  res.json({ accepted: true, project_id: projectId, stripe: { enabled: stripeOn } });
+  res.json({ accepted: true, project_id: projectId, stripe: { enabled: stripeOn }, deposit_pending: !stripeOn && !devAutoRecord() });
 }));
 
 module.exports = router;

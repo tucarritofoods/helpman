@@ -35,12 +35,13 @@ async function report() {
 
   // ---- E1 Stripe ----
   {
-    const env = ['STRIPE_SECRET_KEY', 'STRIPE_PUBLISHABLE_KEY', 'STRIPE_WEBHOOK_SECRET'];
+    // Connect (pro payouts) needs its own webhook secret: Stripe Dashboard > Webhooks > "Connected accounts".
+    const env = ['STRIPE_SECRET_KEY', 'STRIPE_PUBLISHABLE_KEY', 'STRIPE_WEBHOOK_SECRET', 'STRIPE_CONNECT_WEBHOOK_SECRET'];
     const mode = stripeMode();
     let status = env.every(present) ? 'ok' : 'missing';
     let detail = status === 'ok'
       ? `Connected in ${mode.secret || 'unknown'} mode.`
-      : 'Activate the Stripe account, then paste the secret key, the publishable key and the webhook signing secret.';
+      : 'Activate the Stripe account and Connect (Express), then paste the secret and publishable keys and the two webhook signing secrets (account events and Connect events).';
     if (status === 'ok' && mode.secret && mode.publishable && mode.secret !== mode.publishable) {
       status = 'warning'; detail = 'The secret and publishable keys are from different modes (test vs live).';
     } else if (status === 'ok' && isProd() && mode.secret === 'test') {

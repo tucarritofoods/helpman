@@ -54,6 +54,8 @@ services:
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
+      - key: STRIPE_CONNECT_WEBHOOK_SECRET
+        sync: false          # "Connected accounts" webhook -> /api/payments/connect-webhook
       # Two-step verification (REQUIRED for owner/finance in production).
       # Set TOTP_ENC_KEY to a long random string BEFORE anyone enrols and never change it:
       # it encrypts the 2FA secrets (changing it makes them unreadable).

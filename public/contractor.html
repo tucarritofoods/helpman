@@ -74,9 +74,10 @@
     </section>
 
     <section class="tab-panel" id="panel-payouts" role="tabpanel">
+      <div class="card" id="payout-account-card" style="margin-bottom:1rem"><p class="muted">Loading payout account…</p></div>
       <div class="card">
         <h2 style="margin-top:0">My payouts</h2>
-        <p class="small muted">A payout is created when a job you worked on is completed. Support approves it and pays it by the due date.</p>
+        <p class="small muted">A payout is created when a job you worked on is completed. Once the customer has paid in full and the short hold period passes, Helpman sends it automatically to your payout account.</p>
         <div id="payouts-box"><p class="muted">Loading payouts…</p></div>
       </div>
     </section>
@@ -125,7 +126,7 @@
         document.querySelectorAll('#portal-tabs .tab').forEach((x) => x.classList.toggle('active', x === t));
         document.querySelectorAll('.tab-panel').forEach((p) =>
           p.classList.toggle('active', p.id === 'panel-' + t.dataset.tab));
-        if (t.dataset.tab === 'payouts') loadPayouts();
+        if (t.dataset.tab === 'payouts') { loadPayoutAccount(); loadPayouts(); }
         if (t.dataset.tab === 'disputes') loadDisputes();
       });
     });
@@ -172,6 +173,35 @@
           try { await HP.api('POST', `/disputes/${r.id}/comments`, { body: text }); loadDisputes(); } catch (e) { HP.toast(HP.friendlyMessage(e), 'error'); }
         });
       }
+    }
+
+    // ---- Where Helpman sends the money (Stripe Connect Express) ----
+    async function loadPayoutAccount() {
+      const box = document.getElementById('payout-account-card');
+      if (!box) return;
+      try {
+        const a = await HP.api('GET', '/contractor-ops/payout-account');
+        if (a.payroll) { box.hidden = true; return; }
+        let state, action = '';
+        if (!a.available) state = '<div class="banner banner-info">Online payouts are not turned on yet. Helpman will let you know when you can connect your bank.</div>';
+        else if (a.payouts_enabled) state = `<div class="banner banner-ok"><strong>Ready to get paid.</strong> Payouts go to the bank account you set up with Stripe.</div>`;
+        else if (a.connected) { state = `<div class="banner banner-warn"><strong>Almost there.</strong> Stripe still needs a few details before it can send your money.</div>`; action = 'Finish setup'; }
+        else { state = '<div class="banner banner-warn"><strong>Set up your payout account to receive your money.</strong> It takes a few minutes; Stripe asks for your bank and identity details — Helpman never sees them.</div>'; action = 'Set up payouts'; }
+        box.innerHTML = `<h2 style="margin-top:0">Payout account</h2>${state}
+          ${action ? `<button class="btn btn-primary btn-sm" type="button" id="payout-link-btn">${action}</button>` : (a.available ? '<button class="btn btn-outline btn-sm" type="button" id="payout-link-btn">Update bank details</button>' : '')}`;
+        const btn = document.getElementById('payout-link-btn');
+        if (btn) btn.addEventListener('click', async () => {
+          HP.busy(btn, true, 'Opening Stripe…');
+          try { const r = await HP.api('POST', '/contractor-ops/payout-account/link', {}); window.location.href = r.url; }
+          catch (e) { HP.toast(HP.friendlyMessage(e), 'error'); HP.busy(btn, false); }
+        });
+      } catch (e) {
+        box.innerHTML = `<div class="banner banner-warn">Could not load your payout account: ${HP.esc(HP.friendlyMessage(e))}</div>`;
+      }
+    }
+    // Back from Stripe: open the Payouts tab on its own.
+    if (/[?&]payout=(done|refresh)/.test(location.search)) {
+      window.addEventListener('load', () => { const t = document.querySelector('#portal-tabs .tab[data-tab="payouts"]'); if (t) t.click(); });
     }
 
     async function loadPayouts() {

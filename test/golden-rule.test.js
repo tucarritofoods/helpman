@@ -6,7 +6,8 @@
 // mediation, strict photo validation, UPLOADS_DIR and the owner plug-in panel.
 //
 // Own throwaway SQLite DB + server on :3461, so it runs beside test/api.test.js.
-const { test, before } = require('node:test');
+const { test, before, after } = require('node:test');
+after(async () => { const s = await require('../server').listening; if (s) { s.closeAllConnections && s.closeAllConnections(); s.close(); } });
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
@@ -23,6 +24,7 @@ process.env.UPLOADS_DIR = UPLOADS;
 process.env.JWT_SECRET = 'golden-rule-test-secret-0123456789abcdef';
 process.env.AUTH_RATE_LIMIT_MAX = '5000';
 process.env.INTAKE_RATE_LIMIT_MAX = '5000';
+process.env.DEV_AUTORECORD_DEPOSIT = 'true';
 delete process.env.STRIPE_SECRET_KEY;
 delete process.env.DATABASE_URL;
 

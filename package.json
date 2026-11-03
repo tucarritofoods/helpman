@@ -22,7 +22,7 @@
   "scripts": {
     "seed": "node src/seed.js",
     "start": "node server.js",
-    "test": "node --test --test-concurrency=1 test/api.test.js test/golden-rule.test.js",
+    "test": "node --test --test-concurrency=1 --test-force-exit test/api.test.js test/golden-rule.test.js test/money.test.js",
     "ui-smoke": "node test/ui-smoke.js"
   },
   "version": "1.0.0"

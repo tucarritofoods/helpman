@@ -44,6 +44,27 @@ router.post('/webhook', ah(async (req, res) => {
   res.json({ received: true, event: handled });
 }));
 
+// ---- Stripe CONNECT webhook (pro payout accounts): NO auth, signed by Stripe. ----
+// server.js mounts express.raw() on this path too. Its own signing secret.
+router.post('/connect-webhook', ah(async (req, res) => {
+  if (!stripeSvc.isEnabled() || !process.env.STRIPE_CONNECT_WEBHOOK_SECRET) return res.status(503).json({ error: 'Stripe Connect is not configured.' });
+  let handled;
+  try {
+    handled = await stripeSvc.handleConnectWebhook(req.body, req.headers['stripe-signature']);
+  } catch (e) {
+    console.error('[stripe connect webhook]', e.message);
+    return res.status(500).json({ error: 'Webhook processing failed.' });
+  }
+  if (handled === null) return res.status(400).json({ error: 'Invalid webhook signature.' });
+  res.json({ received: true, event: handled });
+}));
+
+// ---- The card-on-file authorization text shown next to the deposit payment ----
+router.get('/card-authorization', ah(async (req, res) => {
+  const billing = require('../services/billing');
+  res.json({ version: billing.CARD_CONSENT_VERSION, text: billing.CARD_CONSENT_TEXT, deposit_pct: await billing.depositPct() });
+}));
+
 // ---- Create a Stripe PaymentIntent for a project deposit (customer) ----
 // The amount is ALWAYS derived from the accepted quote — never trusted from
 // the client — so nobody can underpay by tampering with the request.
@@ -78,6 +99,15 @@ router.post('/deposit-intent', authRequired, requireVerifiedEmail, ah(async (req
     `SELECT id FROM payments WHERE project_id = ? AND kind = 'deposit' AND status IN ('paid','recorded')`
   ).get(project.id);
   if (already) return res.status(409).json({ error: 'The deposit for this project is already paid.' });
+  // Staff never pay on the customer's behalf through the card form.
+  if (req.user.role !== 'customer') return res.status(403).json({ error: 'Only the customer pays the deposit.' });
+  if ((req.body || {}).authorize_balance !== true) {
+    return res.status(422).json({
+      error: 'Please authorize Helpman to charge the remaining balance to this card when you confirm the work.',
+      code: 'CARD_AUTHORIZATION_REQUIRED',
+      fields: { authorize_balance: 'Required.' },
+    });
+  }
   // Supersede any earlier pending intents for this deposit (keeps the ledger clean).
   try {
     const stripe = stripeSvc.getClient();
@@ -89,10 +119,17 @@ router.post('/deposit-intent', authRequired, requireVerifiedEmail, ah(async (req
       try { await stripe.paymentIntents.cancel(row.provider_ref); } catch (e) { /* already gone */ }
       await db.prepare(`UPDATE payments SET status = 'failed', notes = COALESCE(notes,'') || ' | superseded by a new intent' WHERE id = ?`).run(row.id);
     }
+    // Owner's 30/70 rule: the deposit card is saved (customer's explicit
+    // authorization) so the balance is charged automatically on sign-off.
+    const billing = require('../services/billing');
+    const customerId = await billing.ensureCustomer(req.user.id);
+    await billing.recordAuthorization({ projectId: project.id, userId: req.user.id, customerId, ip: req.ip || null });
     const out = await stripeSvc.createDepositIntent({
       projectId: project.id,
       amountCents,
       customerEmail: req.user.email,
+      customerId,
+      saveCard: true,
     });
     res.status(201).json({ ...out, amount_cents: amountCents });
   } catch (e) {
@@ -103,14 +140,7 @@ router.post('/deposit-intent', authRequired, requireVerifiedEmail, ah(async (req
 
 // ---- Final balance (customer): price - everything already paid + refunded ----
 // Allowed only once EVERY milestone is approved by the customer.
-async function paidSoFar(projectId) {
-  const rows = await db.prepare(
-    `SELECT kind, COALESCE(SUM(amount_cents),0) AS s FROM payments
-     WHERE project_id = ? AND status IN ('paid','recorded') GROUP BY kind`
-  ).all(projectId);
-  const by = Object.fromEntries(rows.map(r => [r.kind, Number(r.s)]));
-  return (by.deposit || 0) + (by.milestone || 0) + (by.final || 0) - (by.refund || 0);
-}
+const paidSoFar = (projectId) => require('../services/billing').netPaidCents(projectId);
 
 router.post('/final-intent', authRequired, requireVerifiedEmail, ah(async (req, res) => {
   if (!stripeSvc.isEnabled()) {
@@ -153,6 +183,18 @@ router.post('/final-intent', authRequired, requireVerifiedEmail, ah(async (req, 
     console.error('[stripe]', e.message);
     res.status(502).json({ error: 'Payment service unavailable. Please try again.' });
   }
+}));
+
+// ---- Finance: charge the remaining balance to the saved card now (retry after a failure) ----
+router.post('/projects/:id/charge-balance', authRequired, requireStaff('finance'), ah(async (req, res) => {
+  const p = await db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Project not found.' });
+  if (!await db.prepare('SELECT id FROM completion_sheets WHERE project_id = ?').get(p.id)) {
+    return res.status(409).json({ error: 'The customer has not confirmed the work yet (completion sheet).' });
+  }
+  const out = await require('../services/billing').chargeBalance(p.id, { actorId: req.user.id, trigger: 'staff_retry' });
+  await auditLog(req.user.id, 'payment.balance_charge', 'projects', p.id, `Manual retry: ${out.status}${out.reason ? ' (' + out.reason + ')' : ''}`);
+  res.json(out);
 }));
 
 // ---- Refund a PAID Stripe payment (admin). Omit amount_cents for a full refund. ----

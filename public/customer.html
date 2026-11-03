@@ -381,7 +381,11 @@
       payCtx = { projectId, amountCents, onSuccess, kind };
       document.getElementById('pay-summary').innerHTML =
         `<dl class="kv"><dt>${kind === 'final' ? 'Final balance due' : 'Deposit due'}</dt><dd><strong>${HP.fmtMoney(amountCents)}</strong></dd></dl>
-         <p class="small muted">Secured by Stripe. Cards, Klarna, Affirm and Afterpay are accepted where available.</p>`;
+         <p class="small muted">Secured by Stripe. Helpman never sees your card number.</p>
+         ${kind === 'deposit' ? `<div class="banner banner-info" style="margin:.5rem 0">
+           <p class="small" style="margin:0 0 .4rem"><strong>How payment works:</strong> this deposit books your visit. When you confirm the work is done, the rest is charged automatically to this same card — no second checkout.</p>
+           <label class="small" style="display:flex;gap:.5rem;align-items:flex-start"><input type="checkbox" id="pay-authorize" style="margin-top:.2rem">
+           <span id="pay-authorize-text">I authorize Helpman to charge the remaining balance to this card when I confirm the work is complete.</span></label></div>` : ''}`;
       document.getElementById('pay-error').hidden = true;
       document.getElementById('pay-stripe-element').innerHTML = '';
       document.getElementById('pay-stripe-wrap').style.display = 'none';
@@ -391,10 +395,32 @@
       payBtn.textContent = `Pay ${HP.fmtMoney(amountCents)}`;
       document.getElementById('pay-modal').hidden = false;
       document.body.style.overflow = 'hidden';
+      if (kind === 'deposit') {
+        // The card form opens only after the customer authorizes the balance charge.
+        HP.api('GET', '/payments/card-authorization').then((a) => {
+          const t = document.getElementById('pay-authorize-text');
+          if (t && a && a.text) t.textContent = a.text;
+        }).catch(() => {});
+        document.getElementById('pay-loading').textContent = 'Tick the authorization above to open the secure card form.';
+        const box = document.getElementById('pay-authorize');
+        box.addEventListener('change', () => {
+          if (!box.checked || stripeElements) return;
+          box.disabled = true;
+          document.getElementById('pay-loading').textContent = 'Preparing secure payment…';
+          mountPayment({ authorize_balance: true });
+        });
+        return;
+      }
+      document.getElementById('pay-loading').textContent = 'Preparing secure payment…';
+      mountPayment({});
+    }
+    async function mountPayment(extra) {
+      const { projectId, kind } = payCtx || {};
+      const payBtn = document.getElementById('pay-btn');
       try {
         const status = await HP.api('GET', '/payments/stripe-status');
         if (!status.enabled || !status.publishable_key) throw new Error('Online payments are not enabled right now.');
-        const intent = await HP.api('POST', `/payments/${kind === 'final' ? 'final' : 'deposit'}-intent`, { project_id: projectId });
+        const intent = await HP.api('POST', `/payments/${kind === 'final' ? 'final' : 'deposit'}-intent`, { project_id: projectId, ...extra });
         await loadStripeJs();
         stripeObj = window.Stripe(status.publishable_key);
         stripeElements = stripeObj.elements({ clientSecret: intent.client_secret });
@@ -580,8 +606,10 @@
         <div class="ms">${ms || '<p class="small muted">No milestones yet.</p>'}</div>
         <hr class="divider">${photos}
         <hr class="divider">${payments}
+        ${balanceNotice(p)}
         <div id="signoff-box-${p.id}"></div>
         <div id="dispute-box-${p.id}"></div>
+        ${['assigned', 'scheduled'].includes(p.stage) ? `<div id="cancel-box-${p.id}" style="margin-top:.75rem"><button class="btn btn-outline btn-sm" type="button" data-cancel-preview="${p.id}">Cancel this visit</button></div>` : ''}
         ${review}`;
       body.querySelectorAll('[data-ms-approve]').forEach((btn) => {
         btn.addEventListener('click', async () => {
@@ -599,6 +627,7 @@
       if (rf) rf.addEventListener('submit', (e) => submitReview(e, p.id, body));
       mountSignOff(p, body);
       mountDispute(p, body);
+      mountCancel(p, body);
       body.querySelectorAll('[data-pay-retry]').forEach((btn) => {
         btn.addEventListener('click', () => {
           openStripePay({
@@ -607,6 +636,47 @@
             onSuccess: null,
           });
         });
+      });
+    }
+
+    // ---- Automatic balance charge status (30/70 rule) ----
+    function balanceNotice(p) {
+      const st = p.balance_charge_status;
+      if (!st) return '';
+      const MSG = {
+        paid: ['ok', 'Paid in full — the balance was charged to your saved card. Thank you!'],
+        processing: ['info', 'Your balance payment is processing with your bank.'],
+        requires_action: ['warn', 'Your bank asked you to confirm the balance payment. Use “Pay final balance” below.'],
+        failed: ['warn', 'We could not charge your saved card. Please pay the balance below with the same or another card.'],
+        needs_payment: ['warn', 'Please pay the remaining balance below.'],
+      };
+      const m = MSG[st];
+      return m ? `<div class="banner banner-${m[0] === 'ok' ? 'ok' : m[0] === 'info' ? 'info' : 'warn'}" style="margin:.75rem 0">${HP.esc(m[1])}</div>` : '';
+    }
+
+    // ---- Cancel a visit (before work starts), with the refund shown first ----
+    function mountCancel(p, body) {
+      const btn = body.querySelector(`[data-cancel-preview="${p.id}"]`);
+      if (!btn) return;
+      btn.addEventListener('click', async () => {
+        const box = body.querySelector(`#cancel-box-${p.id}`);
+        try {
+          const q = await HP.api('GET', `/projects/${p.id}/cancellation-preview`);
+          const kept = q.fee_cents > 0 ? ` Under the cancellation policy ${HP.fmtMoney(q.fee_cents)} of your deposit is kept.` : '';
+          box.innerHTML = `<div class="banner banner-warn"><p style="margin:0 0 .5rem"><strong>Cancel this visit?</strong> You will get back <strong>${HP.fmtMoney(q.refund_cents)}</strong>.${kept}</p>
+            <div class="field"><label class="small" for="cancel-reason-${p.id}">Reason (optional)</label><input id="cancel-reason-${p.id}" maxlength="500"></div>
+            <div class="btn-row"><button class="btn btn-danger btn-sm" type="button" data-cancel-go="${p.id}">Cancel visit and refund ${HP.fmtMoney(q.refund_cents)}</button>
+            <button class="btn btn-outline btn-sm" type="button" data-cancel-keep="${p.id}">Keep my visit</button></div></div>`;
+          box.querySelector('[data-cancel-keep]').addEventListener('click', () => refreshProject(p.id, body));
+          box.querySelector('[data-cancel-go]').addEventListener('click', async (e) => {
+            HP.busy(e.target, true, 'Cancelling…');
+            try {
+              const r = await HP.api('POST', `/projects/${p.id}/cancel`, { reason: box.querySelector(`#cancel-reason-${p.id}`).value || undefined });
+              HP.toast(r.refund_cents > 0 ? `Cancelled. ${HP.fmtMoney(r.refund_cents)} is on its way back to your card.` : 'Cancelled.', 'ok');
+              loadProjects();
+            } catch (err) { HP.toast(HP.friendlyMessage(err), 'error'); HP.busy(e.target, false); }
+          });
+        } catch (e) { HP.toast(HP.friendlyMessage(e), 'error'); }
       });
     }
 

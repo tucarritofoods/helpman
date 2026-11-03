@@ -117,6 +117,7 @@ boot.catch((e) => { console.error('[boot] FATAL:', e.message); process.exit(1); 
 // Stripe webhooks need the RAW body for signature verification: register the
 // raw parser for that exact path BEFORE the JSON parser below.
 app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
+app.use('/api/payments/connect-webhook', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -272,6 +273,7 @@ app.use('/api/ai', require('./src/routes/ai'));
 app.use('/api/disputes', require('./src/routes/disputes'));
 app.use('/api/staff', require('./src/routes/staff'));
 app.use('/api/admin/plugs', require('./src/routes/plugs'));
+app.use('/api/admin/settings', require('./src/routes/settings'));
 app.use('/api/me', require('./src/routes/privacy'));
 app.use('/api', require('./src/routes/offers'));
 app.use('/api/email', require('./src/routes/emailEvents'));
@@ -284,7 +286,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 const { processOutbox } = require('./src/routes/campaigns');
 setInterval(() => {
   processOutbox(50).catch(e => console.error('[outbox]', e.message));
-}, 30 * 1000);
+}, 30 * 1000).unref();
 
 // ---- Background: day-before visit reminders (every 10 min; only sends inside the daytime window) ----
 const smsSvc = require('./src/services/sms');
@@ -297,7 +299,13 @@ setInterval(() => {
   runFollowupAutomation()
     .then(r => { if (r.created || r.emailed) console.log('[followup]', JSON.stringify(r)); })
     .catch(e => console.error('[followup]', e.message));
-}, 60 * 60 * 1000);
+}, 60 * 60 * 1000).unref();
+// ---- Background: automatic pro payouts (Stripe Connect) once the hold period passes ----
+setInterval(() => {
+  require('./src/services/billing').runPayouts()
+    .then(r => { if (r.paid) console.log('[payouts]', JSON.stringify(r)); })
+    .catch(e => console.error('[payouts]', e.message));
+}, 60 * 60 * 1000).unref();
 
 // ---- 404 for unknown API routes ----
 app.use('/api', (req, res) => res.status(404).json({ error: 'Unknown API endpoint.' }));
@@ -318,10 +326,13 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
   res.status(500).json({ error: 'Something went wrong on our end. Please try again.' });
 });
 
-boot.then(() => app.listen(PORT, () => {
+const listening = boot.then(() => app.listen(PORT, () => {
   console.log(`Helpman by Mendoza Capital LLC listening on http://localhost:${PORT}`);
   console.log(`Mail: provider=${mailer.activeProvider()} from="${mailer.FROM_NAME} <${mailer.FROM_EMAIL}>"`);
   if (mailer.activeProvider() === 'console') {
     console.log('Mail is in LOG mode: campaigns are recorded in email_log, nothing is really sent. See README "Business email setup".');
   }
 })).catch(() => { /* boot failure already logged and exiting */ });
+
+// Tests close the server when they finish (otherwise the process never exits).
+module.exports = { app, listening };

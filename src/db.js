@@ -769,6 +769,54 @@ db.exec(`CREATE TABLE IF NOT EXISTS dispute_events (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`);
 
+// ---- Corte 2: money (30/70, card on file, Stripe Connect payouts, chargebacks) ----
+// Mirrored for PostgreSQL in src/db/migrations/013_money.sql.
+db.exec(`CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`);
+if (!columnExists('users', 'stripe_customer_id')) db.exec(`ALTER TABLE users ADD COLUMN stripe_customer_id TEXT`);
+if (!columnExists('contractors', 'stripe_account_id')) db.exec(`ALTER TABLE contractors ADD COLUMN stripe_account_id TEXT`);
+if (!columnExists('contractors', 'payouts_enabled')) db.exec(`ALTER TABLE contractors ADD COLUMN payouts_enabled INTEGER NOT NULL DEFAULT 0`);
+if (!columnExists('contractors', 'payout_details_submitted')) db.exec(`ALTER TABLE contractors ADD COLUMN payout_details_submitted INTEGER NOT NULL DEFAULT 0`);
+if (!columnExists('contractors', 'payout_requirements')) db.exec(`ALTER TABLE contractors ADD COLUMN payout_requirements TEXT`);
+if (!columnExists('change_orders', 'contractor_cost_delta_cents')) db.exec(`ALTER TABLE change_orders ADD COLUMN contractor_cost_delta_cents INTEGER NOT NULL DEFAULT 0`);
+if (!columnExists('change_orders', 'applied_at')) db.exec(`ALTER TABLE change_orders ADD COLUMN applied_at TEXT`);
+if (!columnExists('contractor_payables', 'transfer_id')) db.exec(`ALTER TABLE contractor_payables ADD COLUMN transfer_id TEXT`);
+if (!columnExists('contractor_payables', 'reversed_cents')) db.exec(`ALTER TABLE contractor_payables ADD COLUMN reversed_cents INTEGER NOT NULL DEFAULT 0`);
+if (!columnExists('projects', 'balance_charge_status')) db.exec(`ALTER TABLE projects ADD COLUMN balance_charge_status TEXT`);
+if (!columnExists('projects', 'balance_charge_error')) db.exec(`ALTER TABLE projects ADD COLUMN balance_charge_error TEXT`);
+if (!columnExists('projects', 'balance_charge_attempts')) db.exec(`ALTER TABLE projects ADD COLUMN balance_charge_attempts INTEGER NOT NULL DEFAULT 0`);
+if (!columnExists('projects', 'cancellation_kind')) db.exec(`ALTER TABLE projects ADD COLUMN cancellation_kind TEXT`);
+if (!columnExists('projects', 'cancelled_at')) db.exec(`ALTER TABLE projects ADD COLUMN cancelled_at TEXT`);
+// The customer's authorization to charge the remaining balance to the card used for the deposit.
+db.exec(`CREATE TABLE IF NOT EXISTS payment_authorizations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL UNIQUE REFERENCES projects(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  stripe_customer_id TEXT,
+  payment_method_id TEXT,
+  consent_text_version TEXT NOT NULL,
+  ip TEXT,
+  authorized_at TEXT NOT NULL DEFAULT (datetime('now')),
+  revoked_at TEXT
+)`);
+// Card disputes (chargebacks) reported by Stripe: they freeze the pro's payout.
+db.exec(`CREATE TABLE IF NOT EXISTS chargebacks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+  payment_id INTEGER REFERENCES payments(id) ON DELETE SET NULL,
+  stripe_dispute_id TEXT NOT NULL UNIQUE,
+  stripe_charge_id TEXT,
+  amount_cents INTEGER NOT NULL DEFAULT 0,
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','won','lost','closed')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`);
+
 // ---- Migrate payments.provider CHECK to include 'stripe' (was manual/stripe_stub) ----
 // Also adds 'paid' to the status CHECK for Stripe-confirmed payments.
 // 2026-10-07: also adds 'simulated' provider for the test payment mode.

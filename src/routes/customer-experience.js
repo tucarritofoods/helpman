@@ -106,17 +106,20 @@ router.post('/projects/:id/change-orders', authRequired, ah(async (req, res) => 
   if (!isNonEmpty(b.description, 2500)) errors.description = 'Description is required.';
   if (!Number.isInteger(Number(b.price_delta_cents || 0))) errors.price_delta_cents = 'Invalid price change.';
   if (!Number.isInteger(Number(b.schedule_delta_days || 0))) errors.schedule_delta_days = 'Invalid schedule change.';
+  if (!Number.isInteger(Number(b.contractor_cost_delta_cents || 0))) errors.contractor_cost_delta_cents = 'Invalid payout change.';
   if (failIfErrors(res, errors)) return;
 
   // A contractor PROPOSES scope/schedule; the customer price change is set by
   // Helpman staff before the change is sent (golden rule: the pro never prices
   // or writes to the customer directly).
   const isContractor = req.user.role === 'contractor';
+  // The pro may propose the change to THEIR OWN payout; only staff set the customer price.
   const info = await db.prepare(`INSERT INTO change_orders
-    (project_id,title,description,reason,price_delta_cents,schedule_delta_days,status,created_by)
-    VALUES (?,?,?,?,?,?,?,?)`)
+    (project_id,title,description,reason,price_delta_cents,contractor_cost_delta_cents,schedule_delta_days,status,created_by)
+    VALUES (?,?,?,?,?,?,?,?,?)`)
     .run(p.id, b.title.trim(), b.description.trim(), (b.reason || '').trim() || null,
-      isContractor ? 0 : Number(b.price_delta_cents || 0), Number(b.schedule_delta_days || 0), 'draft', req.user.id);
+      isContractor ? 0 : Number(b.price_delta_cents || 0), Number(b.contractor_cost_delta_cents || 0),
+      Number(b.schedule_delta_days || 0), 'draft', req.user.id);
 
   // Drafts are internal: nothing reaches the customer's timeline until staff send it.
   auditLog(req.user.id, 'change_order.created', 'change_orders', info.lastInsertRowid, `Project #${p.id}${isContractor ? ' (proposed by contractor)' : ''}`);
@@ -148,10 +151,15 @@ router.post('/projects/:id/change-orders/:cid/send', authRequired, ah(async (req
   if (b.price_delta_cents !== undefined && !Number.isInteger(Number(b.price_delta_cents))) {
     return res.status(422).json({ errors: { price_delta_cents: 'Invalid price change.' } });
   }
+  if (b.contractor_cost_delta_cents !== undefined && !Number.isInteger(Number(b.contractor_cost_delta_cents))) {
+    return res.status(422).json({ errors: { contractor_cost_delta_cents: 'Invalid payout change.' } });
+  }
   const title = views.redactContacts(co.title);
   const description = views.redactContacts(co.description);
-  await db.prepare(`UPDATE change_orders SET status='sent', title=?, description=?, price_delta_cents=?, sent_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-    .run(title, description, b.price_delta_cents !== undefined ? Number(b.price_delta_cents) : co.price_delta_cents, co.id);
+  await db.prepare(`UPDATE change_orders SET status='sent', title=?, description=?, price_delta_cents=?, contractor_cost_delta_cents=?, sent_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+    .run(title, description,
+      b.price_delta_cents !== undefined ? Number(b.price_delta_cents) : co.price_delta_cents,
+      b.contractor_cost_delta_cents !== undefined ? Number(b.contractor_cost_delta_cents) : (co.contractor_cost_delta_cents || 0), co.id);
   await addEvent(p.id, 'change_order_sent', 'Change order needs approval', title, 'admin');
 
   const job = await db.prepare('SELECT * FROM job_requests WHERE id = ?').get(p.job_request_id);
@@ -187,6 +195,8 @@ router.post('/projects/:id/change-orders/:cid/respond', authRequired, requireRol
 
   auditLog(req.user.id, approved ? 'change_order.approved' : 'change_order.rejected',
     'change_orders', co.id, `Project #${p.id}`);
+  // Approved: the project price and the pro's payout move now (once).
+  if (approved) await require('../services/billing').applyChangeOrder(co.id);
 
   res.json(await db.prepare('SELECT * FROM change_orders WHERE id = ?').get(co.id));
 }));

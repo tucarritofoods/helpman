@@ -78,9 +78,36 @@
     }
   }
 
+  // ---- Business rules (deposit %, payout hold, cancellation / no-show) ----
+  async function renderRules() {
+    const box = document.getElementById('rules-body');
+    if (!box) return;
+    let r;
+    try { r = await HP.api('GET', '/admin/settings'); }
+    catch (e) { box.innerHTML = `<div class="banner banner-warn">Could not load the rules: ${HP.esc(HP.friendlyMessage(e))}</div>`; return; }
+    box.innerHTML = `<form id="rules-form" novalidate>${r.rules.map((x) => `
+      <div class="field" style="max-width:640px">
+        <label for="rule-${HP.esc(x.key)}">${HP.esc(x.label)} ${x.pending_owner ? HP.badge('Owner decision', 'warn') : ''}</label>
+        <input type="number" id="rule-${HP.esc(x.key)}" name="${HP.esc(x.key)}" min="${x.min}" max="${x.max}" step="1" value="${Number(x.value)}" style="max-width:9rem">
+        <p class="small muted" style="margin:.2rem 0 0">${HP.esc(x.help || '')}</p>
+      </div>`).join('')}
+      <button class="btn btn-primary btn-sm" type="submit" id="rules-save">Save rules</button>
+      <p class="small" id="rules-msg" role="status"></p></form>`;
+    document.getElementById('rules-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const values = {};
+      r.rules.forEach((x) => { const v = e.target.elements[x.key].value; if (String(v) !== String(x.value) || x.pending_owner) values[x.key] = Number(v); });
+      const btn = document.getElementById('rules-save');
+      HP.busy(btn, true, 'Saving…');
+      try { await HP.api('PUT', '/admin/settings', { values }); HP.toast('Rules saved.', 'ok'); renderRules(); }
+      catch (err) { document.getElementById('rules-msg').textContent = HP.friendlyMessage(err); HP.busy(btn, false); }
+    });
+  }
+
   window.loadPlugsTab = function () {
     const refresh = document.getElementById('plugs-refresh');
     if (refresh && !refresh.dataset.bound) { refresh.dataset.bound = '1'; refresh.addEventListener('click', render); }
     render();
+    renderRules();
   };
 })();

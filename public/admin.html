@@ -233,6 +233,11 @@
         <p class="small muted">Everything in Helpman is built. What is left is what only the owner can plug in: accounts, keys and a paid hosting plan. Green means plugged in; the live tests use harmless calls (no charge, no customer email).</p>
         <div id="plugs-body"><p class="muted">Loading…</p></div>
       </div>
+      <div class="section">
+        <div class="section-head"><h2>Business rules — money</h2></div>
+        <p class="small muted">The deposit, the payout hold and the cancellation / no-show values. Values marked <strong>Owner decision</strong> are still the safe default (full refund) until you set them.</p>
+        <div id="rules-body"><p class="muted">Loading…</p></div>
+      </div>
     </section>
 
     <section class="tab-panel" id="panel-team" role="tabpanel">
@@ -479,7 +484,8 @@
           <td><strong>${HP.fmtMoney(r.status === 'deposit_unpaid' ? r.deposit_cents : r.balance_cents)}</strong><div class="small muted">of ${HP.fmtMoney(r.price_cents)}</div></td>
           <td>${HP.badge(CO_LABEL[r.status] + (r.days_overdue ? ' · ' + r.days_overdue + ' d' : ''), CO_KIND[r.status] || 'muted')}</td>
           <td class="small">${r.reminders ? r.reminders + ' sent<br>last ' + HP.fmtDateTime(r.last_reminder_at) : '—'}</td>
-          <td><button class="btn btn-outline btn-sm co-remind" type="button" ${r.can_remind.ok ? '' : 'disabled'} title="${r.can_remind.ok ? 'Email the customer' : HP.esc(r.can_remind.reason)}">Send reminder</button></td></tr>`).join('')}
+          <td><button class="btn btn-outline btn-sm co-remind" type="button" ${r.can_remind.ok ? '' : 'disabled'} title="${r.can_remind.ok ? 'Email the customer' : HP.esc(r.can_remind.reason)}">Send reminder</button>
+            ${r.status !== 'deposit_unpaid' ? '<button class="btn btn-outline btn-sm co-charge" type="button" title="Charge the balance to the card saved with the deposit">Charge saved card</button>' : ''}</td></tr>`).join('')}
         </tbody></table></div>`;
       box.querySelectorAll('tr[data-pid]').forEach((tr) => {
         const b = tr.querySelector('.co-remind');
@@ -487,6 +493,17 @@
           HP.busy(b, true, 'Sending…');
           try { await HP.api('POST', `/collections/${tr.dataset.pid}/remind`, {}); HP.toast('Reminder sent.', 'ok'); renderCollections(); }
           catch (e) { HP.toast(HP.friendlyMessage(e), 'error'); HP.busy(b, false); }
+        });
+        const ch = tr.querySelector('.co-charge');
+        if (ch) ch.addEventListener('click', async () => {
+          if (!window.confirm('Charge the balance to the card the customer saved with the deposit?')) return;
+          HP.busy(ch, true, 'Charging…');
+          try {
+            const r = await HP.api('POST', `/payments/projects/${tr.dataset.pid}/charge-balance`, {});
+            const MSG = { paid: 'Charged — paid in full.', processing: 'Processing with the bank.', requires_action: 'The bank asks the customer to confirm: they were emailed a pay link.', failed: 'The card was declined: the customer was emailed a pay link.', needs_payment: 'No saved card: the customer was emailed a pay link.', nothing_due: 'Nothing left to charge.' };
+            HP.toast(MSG[r.status] || ('Not charged: ' + (r.reason || r.status)), r.status === 'paid' ? 'ok' : 'warn');
+            renderCollections();
+          } catch (e) { HP.toast(HP.friendlyMessage(e), 'error'); HP.busy(ch, false); }
         });
       });
     }
@@ -839,10 +856,11 @@
         });
         const pay = tr.querySelector('.po-pay');
         if (pay) pay.addEventListener('click', async () => {
-          const method = (window.prompt('How did you pay? (ach, check, zelle, cash, other)', 'ach') || '').trim().toLowerCase();
+          const method = (window.prompt('How to pay? "stripe" sends it now to the pro\'s Stripe payout account. Or record a payment made outside: ach, check, zelle, cash, other', 'stripe') || '').trim().toLowerCase();
           if (!method) return;
-          const reference = (window.prompt('Reference (check number, transfer id…) — optional') || '').trim();
+          const reference = method === 'stripe' ? '' : (window.prompt('Reference (check number, transfer id…) — optional') || '').trim();
           const r = await payoutAction(`/payables/${id}/pay`, { method, reference }, 'Marked as paid.');
+          if (r && r.status === 409 && r.body && r.body.code === 'PAYOUT_BLOCKED') return; // the toast already says why
           if (r && r.status === 409 && r.body && r.body.customer_balance_cents) {
             if (window.confirm(r.message + '\n\nPay anyway?')) payoutAction(`/payables/${id}/pay`, { method, reference, force: true }, 'Marked as paid (customer balance outstanding).');
           }

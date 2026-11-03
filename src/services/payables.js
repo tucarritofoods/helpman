@@ -4,20 +4,11 @@
 'use strict';
 const db = require('../db');
 
-const TERMS_DAYS = () => Number(process.env.PAYOUT_TERMS_DAYS) || 7;
+// Hold between full payment and payout: owner setting (admin > Setup > Business rules).
+const TERMS_DAYS = () => (process.env.PAYOUT_TERMS_DAYS !== undefined ? Number(process.env.PAYOUT_TERMS_DAYS) : 7);
 
-// What the customer still owes on a project: price - (deposit + milestone + final) + refunds.
-async function customerBalanceCents(projectId) {
-  const p = await db.prepare('SELECT customer_price_cents FROM projects WHERE id = ?').get(projectId);
-  if (!p) return 0;
-  const rows = await db.prepare(
-    `SELECT kind, COALESCE(SUM(amount_cents),0) AS s FROM payments
-     WHERE project_id = ? AND status IN ('paid','recorded') GROUP BY kind`
-  ).all(projectId);
-  const by = Object.fromEntries(rows.map(r => [r.kind, Number(r.s)]));
-  const net = (by.deposit || 0) + (by.milestone || 0) + (by.final || 0) - (by.refund || 0);
-  return Math.max(0, p.customer_price_cents - net);
-}
+// What the customer still owes on a project (single source: billing).
+const customerBalanceCents = (projectId) => require('./billing').balanceCents(projectId);
 
 // Idempotent: returns the existing payable if there is one. No contractor -> null.
 async function ensurePayable(project) {
@@ -28,7 +19,8 @@ async function ensurePayable(project) {
   if (who && who.provider_type === 'employee') return null;
   const existing = await db.prepare('SELECT * FROM contractor_payables WHERE project_id = ?').get(project.id);
   if (existing) return existing;
-  const due = new Date(Date.now() + TERMS_DAYS() * 86400000).toISOString();
+  const holdDays = await require('./settings').get('payout_hold_days');
+  const due = new Date(Date.now() + holdDays * 86400000).toISOString();
   try {
     await db.prepare(
       `INSERT INTO contractor_payables (project_id, contractor_id, payable_cents, status, due_at)

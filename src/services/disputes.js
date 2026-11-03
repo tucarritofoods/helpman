@@ -8,15 +8,8 @@ async function openDisputeFor(projectId) {
   return db.prepare(`SELECT id FROM disputes WHERE project_id = ? AND status IN ${OPEN}`).get(projectId);
 }
 
-// What the customer has paid on the project, net of refunds.
-async function netPaidCents(projectId) {
-  const rows = await db.prepare(
-    `SELECT kind, COALESCE(SUM(amount_cents),0) AS s FROM payments
-     WHERE project_id = ? AND status IN ('paid','recorded') GROUP BY kind`
-  ).all(projectId);
-  const by = Object.fromEntries(rows.map(r => [r.kind, Number(r.s)]));
-  return (by.deposit || 0) + (by.milestone || 0) + (by.final || 0) - (by.refund || 0);
-}
+// What the customer has paid on the project, net of refunds (single source: billing).
+const netPaidCents = (projectId) => require('./billing').netPaidCents(projectId);
 
 // Refund rows already created FOR THIS dispute (makes a retry after a partial failure safe).
 async function refundedForDispute(projectId, disputeId) {
@@ -29,9 +22,9 @@ async function refundedForDispute(projectId, disputeId) {
 
 // Refunds `amountCents`: Stripe charges first (newest first, each up to what is refundable),
 // and whatever remains is recorded as a MANUAL refund for the team to send outside the app.
-async function executeRefund({ projectId, amountCents, disputeId }) {
+async function executeRefund({ projectId, amountCents, disputeId, note: customNote }) {
   const stripeSvc = require('./stripe');
-  const note = `Dispute #${disputeId} — refund`;
+  const note = customNote || `Dispute #${disputeId} — refund`;
   let remaining = amountCents, viaStripe = 0, manual = 0;
   if (remaining > 0 && stripeSvc.isEnabled()) {
     const pays = await db.prepare(

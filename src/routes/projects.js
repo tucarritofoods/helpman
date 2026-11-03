@@ -557,6 +557,8 @@ router.patch('/:id/stage', authRequired, ah(async (req, res) => {
       await db.prepare('UPDATE contractors SET jobs_completed = jobs_completed + 1 WHERE id = ?').run(p.contractor_id);
       // What we owe the contractor for this job (admin approves and pays it later).
       await require('../services/payables').ensurePayable(p);
+      // Fully paid and no hold configured: pay the pro right away (Stripe Connect).
+      await require('../services/billing').runPayouts({ projectId: p.id }).catch(() => {});
     }
     // Notify BOTH parties that the project is complete.
     const { completionEmails } = require('../services/notify');
@@ -673,7 +675,65 @@ router.post('/:id/sign-off', authRequired, ah(async (req, res) => {
     }).catch(() => {});
   }
   const sheet = await db.prepare('SELECT signed_at FROM completion_sheets WHERE project_id = ?').get(p.id);
-  res.status(201).json({ signed: true, signed_at: sheet.signed_at });
+  // Owner's 30/70 rule: confirming the work charges the remaining balance to the
+  // saved card automatically. A card problem never undoes the signature.
+  let balance_charge;
+  try {
+    balance_charge = await require('../services/billing').chargeBalance(p.id, { actorId: req.user.id, trigger: 'signoff' });
+  } catch (e) {
+    console.error('[balance charge]', e.message);
+    balance_charge = { status: 'error' };
+  }
+  res.status(201).json({ signed: true, signed_at: sheet.signed_at, balance_charge });
+}));
+
+// ---- Cancellation and no-show (owner's money rules, admin > Setup > Business rules) ----
+// GET preview: what the customer would get back. POST: do it.
+//   customer:  kind = customer_cancel (their own project, before work starts)
+//   dispatch:  customer_cancel | customer_no_show | contractor_no_show (+ option) | staff (full refund)
+function cancelKindFor(req, kind) {
+  if (req.user.role === 'customer') return 'customer_cancel';
+  return require('../services/billing').CANCEL_KINDS.includes(kind) ? kind : null;
+}
+router.get('/:id/cancellation-preview', authRequired, ah(async (req, res) => {
+  const p = await loadProject(req, res);
+  if (!p) return;
+  if (req.user.role === 'contractor') return res.status(403).json({ error: 'Not allowed.' });
+  if (req.user.role === 'admin' && !can(req.user, 'dispatch')) return res.status(403).json({ error: 'Your team role cannot cancel projects.', code: 'STAFF_ROLE' });
+  const kind = cancelKindFor(req, String(req.query.kind || 'customer_cancel'));
+  if (!kind) return res.status(422).json({ error: 'Unknown cancellation kind.' });
+  const q = await require('../services/billing').cancellationQuote(p, kind);
+  res.json({ ...q, can_cancel: ['assigned', 'scheduled'].includes(p.stage) });
+}));
+router.post('/:id/cancel', authRequired, ah(async (req, res) => {
+  const p = await loadProject(req, res);
+  if (!p) return;
+  if (req.user.role === 'contractor') return res.status(403).json({ error: 'Pros cannot cancel a job. Message Helpman support.' });
+  if (req.user.role === 'admin' && !can(req.user, 'dispatch')) return res.status(403).json({ error: 'Your team role cannot cancel projects.', code: 'STAFF_ROLE' });
+  const b = req.body || {};
+  const kind = cancelKindFor(req, b.kind);
+  if (!kind) return res.status(422).json({ errors: { kind: 'Choose customer_cancel, customer_no_show, contractor_no_show or staff.' } });
+  if (b.reason && !isNonEmpty(b.reason, 500)) return res.status(422).json({ errors: { reason: 'Reason is too long.' } });
+  if (await require('../services/disputes').openDisputeFor(p.id)) {
+    return res.status(409).json({ error: 'There is an open dispute on this project: resolve it instead.', code: 'DISPUTE_HOLD' });
+  }
+  const billing = require('../services/billing');
+  try {
+    // The pro did not come and the customer prefers a new pro: re-dispatch, no money moves.
+    if (kind === 'contractor_no_show' && b.option === 'reschedule') {
+      await db.prepare('INSERT INTO visit_events (project_id, outcome, by_user, note) VALUES (?,?,?,?)').run(p.id, 'contractor_no_show', req.user.id, (b.reason || '').trim() || null);
+      return res.json(await billing.releaseForReschedule(p, { actorId: req.user.id }));
+    }
+    if (kind === 'contractor_no_show' || kind === 'customer_no_show') {
+      await db.prepare('INSERT INTO visit_events (project_id, outcome, by_user, note) VALUES (?,?,?,?)').run(p.id, kind, req.user.id, (b.reason || '').trim() || null);
+    }
+    const out = await billing.cancelProject(p, { kind, actorId: req.user.id, reason: b.reason });
+    res.json({ cancelled: true, ...out });
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    console.error('[cancel]', e.message);
+    res.status(502).json({ error: 'The refund could not be completed. Nothing was charged twice; check Payments and try again.' });
+  }
 }));
 
 // ---- Contractor/admin: mark a milestone done ----

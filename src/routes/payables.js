@@ -14,7 +14,7 @@ const { customerBalanceCents, ensurePayable } = require('../services/payables');
 const router = express.Router();
 router.use(authRequired);
 
-const METHODS = ['ach', 'check', 'zelle', 'cash', 'other'];
+const METHODS = ['stripe', 'ach', 'check', 'zelle', 'cash', 'other'];
 // SQLite stores 'YYYY-MM-DD HH:MM:SS' (UTC) text; PostgreSQL returns Date objects.
 const toDate = (v) => {
   if (v instanceof Date) return v;
@@ -83,6 +83,23 @@ router.post('/:id/pay', ah(async (req, res) => {
   const pb = await db.prepare('SELECT * FROM contractor_payables WHERE id = ?').get(req.params.id);
   if (!pb) return res.status(404).json({ error: 'Payable not found.' });
   if (!['pending', 'approved'].includes(pb.status)) return res.status(409).json({ error: 'This payable is already ' + pb.status + '.' });
+
+  // Stripe Connect: pay now (skips only the hold period). Every money guard applies
+  // and there is no override: Stripe moves real money.
+  if (b.method === 'stripe') {
+    const out = await require('../services/billing').transferPayable(pb, { actorId: req.user.id, ignoreHold: true });
+    if (!out.paid) {
+      const WHY = {
+        stripe_off: 'Stripe is not configured.', not_completed: 'The project is not completed.',
+        customer_balance_due: 'The customer has not paid in full yet.', dispute: 'There is an open dispute.',
+        chargeback: 'There is an open card dispute (chargeback).', payroll: 'Company technicians are paid through payroll.',
+        payout_account_not_ready: 'The pro has not finished setting up their Stripe payout account.',
+        nothing_to_pay: 'Nothing to pay.', already_paid: 'This payable was just paid.', transfer_failed: 'Stripe refused the transfer.',
+      };
+      return res.status(409).json({ error: out.blockers.map(k => WHY[k] || k).join(' '), blockers: out.blockers, code: 'PAYOUT_BLOCKED' });
+    }
+    return res.json(await db.prepare('SELECT * FROM contractor_payables WHERE id = ?').get(pb.id));
+  }
 
   // Hold: no payout while a dispute is open on the project (resolve it first).
   if (await require('../services/disputes').openDisputeFor(pb.project_id)) {
