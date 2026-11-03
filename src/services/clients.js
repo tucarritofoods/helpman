@@ -97,6 +97,7 @@ async function loadIndex() {
   }
 
   const now = Date.now();
+  const lostAfter = await require('./settings').get('client_lost_after_days').catch(() => LOST_AFTER_DAYS);
   for (const c of [...byId.values(), ...guests.values()]) {
     const open = c.projects.some((p) => OPEN_STAGES.includes(p.stage) && depositPaid.has(p.id));
     const done = c.projects.some((p) => p.stage === 'completed');
@@ -107,7 +108,7 @@ async function loadIndex() {
     else {
       const allQuotes = c.jobs.flatMap((j) => quotesByJob.get(j.id) || []);
       const allDead = allQuotes.length && allQuotes.every((s) => s === 'rejected' || s === 'expired');
-      const stale = now - c.last_activity > LOST_AFTER_DAYS * 86400000;
+      const stale = now - c.last_activity > lostAfter * 86400000;
       lc = allDead || stale ? 'lost' : 'prospect';
     }
     c.lifecycle = lc;

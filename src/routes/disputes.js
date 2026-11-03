@@ -79,8 +79,14 @@ router.get('/', ah(async (req, res) => {
   if (req.user.role === 'customer') { join = 'JOIN projects p ON p.id = d.project_id JOIN job_requests j ON j.id = p.job_request_id'; where.push('j.customer_id = ?'); args.push(req.user.id); }
   else if (req.user.role === 'contractor') { join = 'JOIN projects p ON p.id = d.project_id JOIN contractors c ON c.id = p.contractor_id'; where.push('c.user_id = ?'); args.push(req.user.id); }
   else if (!can(req.user, 'read')) return res.status(403).json({ error: 'You do not have permission to do that.' });
+  // Staff also get who the client is and the service (Corte 6.2: link to the client profile).
+  const staffCols = req.user.role === 'admin'
+    ? `, (SELECT j2.customer_id FROM projects p2 JOIN job_requests j2 ON j2.id = p2.job_request_id WHERE p2.id = d.project_id) AS customer_id,
+       (SELECT COALESCE(u2.name, j2.name) FROM projects p2 JOIN job_requests j2 ON j2.id = p2.job_request_id LEFT JOIN users u2 ON u2.id = j2.customer_id WHERE p2.id = d.project_id) AS customer_name,
+       (SELECT j2.service_type FROM projects p2 JOIN job_requests j2 ON j2.id = p2.job_request_id WHERE p2.id = d.project_id) AS service_type`
+    : '';
   const rows = await db.prepare(
-    `SELECT d.* FROM disputes d ${join} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY d.id DESC LIMIT 200`
+    `SELECT d.*${staffCols} FROM disputes d ${join} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY d.id DESC LIMIT 200`
   ).all(...args);
   const role = req.user.role === 'admin' ? 'admin' : req.user.role;
   res.json(rows.map(d => viewFor(d, role)));

@@ -4,36 +4,7 @@
 
   const dayNames=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 
-  function addProTabs(){
-    const tabs=document.getElementById('portal-tabs');
-    if(!tabs || document.querySelector('[data-tab="pro-dashboard"]')) return;
-
-    const defs=[
-      ['pro-dashboard','Overview'],
-      ['availability','Availability'],
-      ['documents','Compliance'],
-      ['earnings','Earnings']
-    ];
-    defs.reverse().forEach(([key,label])=>{
-      const b=document.createElement('button');
-      b.className='tab'; b.dataset.tab=key; b.setAttribute('role','tab'); b.textContent=label;
-      tabs.insertBefore(b,tabs.firstChild);
-      const s=document.createElement('section');
-      s.className='tab-panel'; s.id='panel-'+key; s.setAttribute('role','tabpanel');
-      s.innerHTML=`<div id="hm3-${key}"><p class="muted">Loading…</p></div>`;
-      tabs.parentNode.insertBefore(s,tabs.nextElementSibling);
-    });
-
-    document.querySelectorAll('#portal-tabs .tab').forEach(t=>{
-      t.addEventListener('click',()=>{
-        if(t.dataset.tab==='pro-dashboard') loadDashboard();
-        if(t.dataset.tab==='availability') loadAvailability();
-        if(t.dataset.tab==='documents') loadDocuments();
-        if(t.dataset.tab==='earnings') loadEarnings();
-      });
-    });
-    document.querySelector('[data-tab="pro-dashboard"]').click();
-  }
+  // Corte 6.2: the tabs are part of contractor.html now; this file only fills them.
 
   async function loadDashboard(){
     const box=document.getElementById('hm3-pro-dashboard'); if(!box)return;
@@ -175,22 +146,6 @@
     }catch(e){box.innerHTML=`<div class="banner banner-warn">${HP.esc(HP.friendlyMessage(e))}</div>`;}
   }
 
-  async function loadEarnings(){
-    const box=document.getElementById('hm3-earnings'); if(!box)return;
-    try{
-      const d=await HP.api('GET','/contractor-ops/dashboard');
-      box.innerHTML=`
-        <div class="hm3-stats">
-          <div><span>Pending</span><strong>${HP.fmtMoney(d.payouts.pending_cents)}</strong></div>
-          <div><span>Approved</span><strong>${HP.fmtMoney(d.payouts.approved_cents)}</strong></div>
-          <div><span>Paid</span><strong>${HP.fmtMoney(d.payouts.paid_cents)}</strong></div>
-        </div>
-        <div class="card"><h2>Payout history</h2>
-          ${d.payouts.items.length?d.payouts.items.map(x=>`<div class="hm3-list-row"><div><strong>${HP.fmtMoney(x.payable_cents)}</strong><small>Project #${x.project_id} · ${HP.fmtDate(x.created_at)}</small></div>${HP.badge(x.status,x.status==='paid'?'ok':x.status==='approved'?'info':'muted')}</div>`).join(''):'<p class="muted">No payout records yet.</p>'}
-        </div>`;
-    }catch(e){box.innerHTML=`<div class="banner banner-warn">${HP.esc(HP.friendlyMessage(e))}</div>`;}
-  }
-
   function enhanceJobDailyLogs(){
     const container=document.getElementById('jobs-list'); if(!container)return;
     const obs=new MutationObserver(()=>{
@@ -224,5 +179,6 @@
     obs.observe(container,{childList:true,subtree:true});
   }
 
-  document.addEventListener('DOMContentLoaded',()=>{addProTabs();enhanceJobDailyLogs();});
+  window.HMPro={loadDashboard,loadAvailability,loadDocuments};
+  document.addEventListener('DOMContentLoaded',enhanceJobDailyLogs);
 })();

@@ -85,6 +85,15 @@ a { color: var(--info); }
 }
 .main-nav a.nav-cta:hover { background: var(--navy-2); color: #fff; }
 .nav-user { color: var(--muted); font-size: .9rem; }
+/* Corte 6.2: on phones the header stays one row (it used to stack 5 links). */
+@media (max-width: 560px) {
+  .header-inner { flex-wrap: nowrap; padding: .45rem .75rem; }
+  .main-nav { flex-wrap: nowrap; gap: .15rem; }
+  .main-nav a { padding: .4rem .5rem; font-size: .85rem; white-space: nowrap; }
+  .main-nav a.nav-cta { padding: .4rem .7rem; }
+  .main-nav .nav-minor, .nav-user { display: none; }
+  .helpman-logo { max-width: 120px; height: auto; }
+}
 
 /* ---------- footer ---------- */
 .site-footer { background: var(--navy); color: #c7d3e4; margin-top: 3rem; }
@@ -124,7 +133,7 @@ a { color: var(--info); }
 .field label .req, .field > .label .req { color: var(--err); }
 .field input[type="text"], .field input[type="email"], .field input[type="tel"],
 .field input[type="password"], .field input[type="number"], .field input[type="url"],
-.field input[type="date"], .field input[type="search"], .field select, .field textarea {
+.field input[type="date"], .field input[type="search"], .field input:not([type]), .field select, .field textarea {
   width: 100%; font: inherit; padding: .65rem .75rem;
   border: 1.5px solid var(--line); border-radius: .6rem; background: #fff; color: var(--ink);
 }
@@ -134,7 +143,7 @@ a { color: var(--info); }
 .field textarea { min-height: 5.5rem; resize: vertical; }
 /* Corte 6: controls used outside a .field (filters, inline table edits, invite rows)
    get the same look, slightly smaller. :where() keeps .field rules in charge. */
-:where(.tab-panel, .section, .modal-body) :where(select, input[type="text"], input[type="email"], input[type="tel"], input[type="number"], input[type="date"], input[type="datetime-local"], input[type="search"]):not(.field *) {
+:where(.tab-panel, .section, .modal-body) :where(select, input:not([type]), input[type="text"], input[type="email"], input[type="tel"], input[type="number"], input[type="date"], input[type="datetime-local"], input[type="search"]):not(.field *) {
   font: inherit; font-size: .9rem; padding: .45rem .6rem; border: 1.5px solid var(--line); border-radius: .55rem; background: #fff; color: var(--ink); min-height: 2.25rem;
 }
 :where(.tab-panel, .section, .modal-body) :where(select, input):not(.field *):focus { outline: 2px solid var(--amber); outline-offset: 1px; border-color: var(--amber); }

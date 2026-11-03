@@ -20,14 +20,21 @@
     <div id="pending-banner"></div>
 
     <div class="tabs" role="tablist" id="portal-tabs">
-      <button class="tab active" data-tab="profile" role="tab">Profile</button>
+      <button class="tab active" data-tab="overview" role="tab">Overview</button>
       <button class="tab" data-tab="jobs" role="tab">My jobs</button>
+      <button class="tab" data-tab="availability" role="tab">Availability</button>
+      <button class="tab" data-tab="documents" role="tab">Compliance</button>
       <button class="tab" data-tab="payouts" role="tab">Payouts</button>
       <button class="tab" data-tab="disputes" role="tab">Disputes</button>
       <button class="tab" data-tab="messages" role="tab">Messages</button>
+      <button class="tab" data-tab="profile" role="tab">Profile</button>
     </div>
 
-    <section class="tab-panel active" id="panel-profile" role="tabpanel">
+    <section class="tab-panel active" id="panel-overview" role="tabpanel"><div id="hm3-pro-dashboard"><p class="muted">Loading…</p></div></section>
+    <section class="tab-panel" id="panel-availability" role="tabpanel"><div id="hm3-availability"><p class="muted">Loading…</p></div></section>
+    <section class="tab-panel" id="panel-documents" role="tabpanel"><div id="hm3-documents"><p class="muted">Loading…</p></div></section>
+
+    <section class="tab-panel" id="panel-profile" role="tabpanel">
       <div class="card" id="profile-card"><p class="muted">Loading your profile…</p></div>
       <div class="card" id="photo-card"><p class="muted">Loading photo…</p></div>
       <div class="card">
@@ -121,15 +128,33 @@
     'use strict';
     HP.mountHeader('portal');
 
-    document.querySelectorAll('#portal-tabs .tab').forEach((t) => {
-      t.addEventListener('click', () => {
-        document.querySelectorAll('#portal-tabs .tab').forEach((x) => x.classList.toggle('active', x === t));
-        document.querySelectorAll('.tab-panel').forEach((p) =>
-          p.classList.toggle('active', p.id === 'panel-' + t.dataset.tab));
-        if (t.dataset.tab === 'payouts') { loadPayoutAccount(); loadPayouts(); }
-        if (t.dataset.tab === 'disputes') loadDisputes();
-      });
-    });
+    // Corte 6.2: one handler for every tab. An older script used to inject Overview,
+    // Availability, Compliance and Earnings whose panels never showed; they are part of
+    // the page now (Earnings was the same list as Payouts). The open tab stays in the address.
+    function showTab(name, push) {
+      const t = document.querySelector(`#portal-tabs .tab[data-tab="${CSS.escape(name || '')}"]`);
+      if (!t) return false;
+      document.querySelectorAll('#portal-tabs .tab').forEach((x) => { x.classList.toggle('active', x === t); x.setAttribute('aria-selected', x === t); });
+      document.querySelectorAll('main .tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'panel-' + name));
+      if (push !== false && location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
+      const P = window.HMPro || {};
+      if (name === 'overview' && P.loadDashboard) P.loadDashboard();
+      if (name === 'availability' && P.loadAvailability) P.loadAvailability();
+      if (name === 'documents' && P.loadDocuments) P.loadDocuments();
+      if (name === 'payouts') { loadPayoutAccount(); loadPayouts(); }
+      if (name === 'disputes') loadDisputes();
+      return true;
+    }
+    document.getElementById('portal-tabs').addEventListener('click', (e) => { const t = e.target.closest('.tab'); if (t) showTab(t.dataset.tab); });
+    window.addEventListener('hashchange', () => showTab(location.hash.slice(1), false));
+    document.addEventListener('DOMContentLoaded', () => { if (!showTab(location.hash.slice(1), false)) showTab('overview', false); });
+
+    // Specialties are stored as a JSON list (older rows: plain text). Shown as "painting, drywall".
+    function specialtiesText(v) {
+      if (Array.isArray(v)) return v.join(', ');
+      try { const a = JSON.parse(v); if (Array.isArray(a)) return a.join(', '); } catch (e) { /* plain text */ }
+      return String(v || '');
+    }
 
     async function loadDisputes() {
       const box = document.getElementById('disputes-box');
@@ -311,14 +336,14 @@
         box.innerHTML = `
           <div class="section-head">
             <h2 style="margin:0">${HP.esc(c.legal_name || '')}</h2>
-            ${HP.badge(c.lifecycle || c.status, c.status === 'active' ? 'ok' : 'warn')}
+            ${HP.badge(({ verification: 'In verification', new_active: 'New pro', active: 'Active', top_performer: 'Top performer', suspended: 'Suspended', rejected: 'Not approved', applicant: 'Applicant' })[c.lifecycle] || c.lifecycle || c.status, c.status === 'active' ? 'ok' : 'warn')}
           </div>
           <dl class="kv">
             <dt>Contact</dt><dd>${HP.esc(c.user_name || '')} · ${HP.esc(c.email || '')} ${c.phone ? '· ' + HP.esc(c.phone) : ''}</dd>
             <dt>Base</dt><dd>${HP.esc([c.city, c.service_base].filter(Boolean).join(' · ') || '—')}</dd>
             <dt>Radius</dt><dd>${c.service_radius_miles != null ? c.service_radius_miles + ' miles' : '—'}</dd>
             <dt>Experience</dt><dd>${c.years_experience != null ? c.years_experience + ' years' : '—'}</dd>
-            <dt>Specialties</dt><dd>${HP.esc(c.specialties || '—')}</dd>
+            <dt>Specialties</dt><dd>${HP.esc(specialtiesText(c.specialties) || '—')}</dd>
             <dt>Jobs completed</dt><dd>${c.jobs_completed || 0}</dd>
           </dl>
           <div class="score-wrap"><span class="small" style="min-width:120px">Performance score</span>
@@ -332,7 +357,7 @@
         // Prefill the edit form.
         const f = document.getElementById('profile-form');
         ['city', 'service_base', 'service_radius_miles', 'years_experience', 'specialties', 'license_number', 'insurance_info']
-          .forEach((k) => { if (f[k] && c[k] !== null && c[k] !== undefined) f[k].value = c[k]; });
+          .forEach((k) => { if (f[k] && c[k] !== null && c[k] !== undefined) f[k].value = k === 'specialties' ? specialtiesText(c[k]) : c[k]; });
       } catch (e) {
         box.innerHTML = `<div class="banner banner-warn">Could not load your profile: ${HP.esc(HP.friendlyMessage(e))}</div>`;
       }
@@ -343,9 +368,10 @@
       const form = e.target, btn = document.getElementById('profile-save');
       HP.clearFieldErrors(form);
       const body = {};
-      ['city', 'service_base', 'specialties', 'license_number', 'insurance_info'].forEach((k) => {
+      ['city', 'service_base', 'license_number', 'insurance_info'].forEach((k) => {
         if (form[k].value.trim() !== '') body[k] = form[k].value.trim();
       });
+      if (form.specialties.value.trim() !== '') body.specialties = form.specialties.value.split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
       ['service_radius_miles', 'years_experience'].forEach((k) => {
         if (form[k].value !== '') body[k] = Number(form[k].value);
       });
@@ -376,7 +402,9 @@
         }
         box.innerHTML = '<div class="proj-list"></div>';
         const list = box.querySelector('.proj-list');
-        projects.forEach((p) => list.appendChild(jobCard(p)));
+        // Offers waiting for an answer first, then work in progress, then finished jobs.
+        const rank = (p) => (p.contractor_status === 'offered' ? 0 : ['completed', 'cancelled'].includes(p.stage) ? 2 : 1);
+        projects.slice().sort((a, b) => rank(a) - rank(b) || b.id - a.id).forEach((p) => list.appendChild(jobCard(p)));
       } catch (e) {
         box.innerHTML = `<div class="banner banner-warn">Could not load your jobs: ${HP.esc(HP.friendlyMessage(e))}</div>`;
       }
@@ -386,8 +414,8 @@
       const card = HP.el(`<article class="proj-card">
         <div class="proj-head">
           <button type="button" aria-expanded="false">
-            <span class="job-title">Job #${p.id}</span><br>
-            <span class="job-meta">Payout ${HP.fmtMoney(p.contractor_cost_cents)} · ${HP.fmtDate(p.created_at)}</span>
+            <span class="job-title">Job #${p.id} — ${HP.esc(((p.job && p.job.service_type) || '').replace(/_/g, ' '))}</span><br>
+            <span class="job-meta">${p.contractor_status === 'offered' ? '<strong>Offer waiting for your answer</strong> · ' : ''}Payout ${HP.fmtMoney(p.contractor_cost_cents)} · ${p.scheduled_start ? 'visit ' + HP.fmtDate(String(p.scheduled_start).slice(0, 10)) : HP.fmtDate(p.created_at)}</span>
           </button>
           ${HP.badge(HP.PROJECT_STAGE[p.stage] || p.stage, HP.statusKind(p.stage))}
           <span class="chev" aria-hidden="true">▾</span>

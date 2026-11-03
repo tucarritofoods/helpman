@@ -26,7 +26,7 @@ async function undeliverable(email) {
 async function loadItems(now = new Date()) {
   const projects = await db.prepare(
     `SELECT p.id AS project_id, p.customer_price_cents, p.stage, p.created_at, j.service_type, j.name AS job_name,
-            j.email AS job_email, u.email AS user_email, u.name AS user_name, q.deposit_cents
+            j.email AS job_email, j.customer_id, u.email AS user_email, u.name AS user_name, q.deposit_cents
      FROM projects p JOIN job_requests j ON j.id = p.job_request_id
      LEFT JOIN users u ON u.id = j.customer_id LEFT JOIN quotes q ON q.id = p.quote_id
      WHERE p.stage <> 'cancelled' ORDER BY p.id DESC LIMIT 2000`
@@ -56,7 +56,7 @@ async function loadItems(now = new Date()) {
     const c = col.classify(base, now);
     items.push({
       ...base, ...c,
-      customer_name: p.user_name || p.job_name, customer_email: p.user_email || p.job_email,
+      customer_id: p.customer_id || null, customer_name: p.user_name || p.job_name, customer_email: p.user_email || p.job_email,
       service_type: p.service_type, price_cents: Number(p.customer_price_cents), paid_cents: paid, stage: p.stage,
       can_remind: col.canRemind(base, c, now),
     });

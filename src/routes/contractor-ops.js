@@ -246,7 +246,9 @@ router.get('/projects/:id/daily-logs', authRequired, requireRole('contractor'), 
 }));
 
 // Admin document review.
-router.patch('/admin/documents/:id', authRequired, requireRole('admin'), ah(async(req,res)=>{
+// Corte 6.2: reviewing a compliance document is part of verifying a pro, so it needs the
+// same 'dispatch' permission as PATCH /api/contractors/:id/verify (before: any team role).
+router.patch('/admin/documents/:id', authRequired, requireRole('admin'), require('../services/permissions').requireStaff('dispatch'), ah(async(req,res)=>{
   const d=await db.prepare('SELECT * FROM contractor_documents WHERE id=?').get(req.params.id);
   if(!d) return res.status(404).json({error:'Document not found.'});
   const b=req.body||{};

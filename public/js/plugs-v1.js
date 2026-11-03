@@ -85,12 +85,17 @@
     let r;
     try { r = await HP.api('GET', '/admin/settings'); }
     catch (e) { box.innerHTML = `<div class="banner banner-warn">Could not load the rules: ${HP.esc(HP.friendlyMessage(e))}</div>`; return; }
-    box.innerHTML = `<form id="rules-form" novalidate>${r.rules.map((x) => `
+    const GROUPS = { money: 'Money', timing: 'Reminders and timeframes' };
+    const field = (x) => `
       <div class="field" style="max-width:640px">
         <label for="rule-${HP.esc(x.key)}">${HP.esc(x.label)} ${x.pending_owner ? HP.badge('Owner decision', 'warn') : ''}</label>
         <input type="number" id="rule-${HP.esc(x.key)}" name="${HP.esc(x.key)}" min="${x.min}" max="${x.max}" step="1" value="${Number(x.value)}" style="max-width:9rem">
         <p class="small muted" style="margin:.2rem 0 0">${HP.esc(x.help || '')}</p>
-      </div>`).join('')}
+      </div>`;
+    box.innerHTML = `<form id="rules-form" novalidate>${Object.keys(GROUPS).map((g) => {
+      const rows = r.rules.filter((x) => (x.group || 'money') === g);
+      return rows.length ? `<h3 style="margin:1rem 0 .5rem">${GROUPS[g]}</h3>${rows.map(field).join('')}` : '';
+    }).join('')}
       <button class="btn btn-primary btn-sm" type="submit" id="rules-save">Save rules</button>
       <p class="small" id="rules-msg" role="status"></p></form>`;
     document.getElementById('rules-form').addEventListener('submit', async (e) => {

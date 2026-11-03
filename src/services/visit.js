@@ -281,6 +281,11 @@ async function sendReceipt(projectId) {
 // ---------------------------------------------------------------------------
 async function runLifecycleEmails({ now = new Date() } = {}) {
   const out = { confirm_reminders: 0, escalations: 0, review_reminders: 0 };
+  // Owner's timeframes (admin › Setup › Business rules).
+  const settings = require('./settings');
+  const remindH = await settings.get('confirm_reminder_hours');
+  const escalateH = Math.max(remindH + 1, await settings.get('confirm_escalate_hours'));
+  const reviewD = await settings.get('review_request_days');
   const age = (v) => { const d = toDate(v); return d ? now.getTime() - d.getTime() : -1; };
   // Finished but not confirmed: a reminder at 24 h, support is told at 72 h.
   const waiting = await db.prepare(
@@ -289,14 +294,14 @@ async function runLifecycleEmails({ now = new Date() } = {}) {
        AND NOT EXISTS (SELECT 1 FROM disputes d WHERE d.project_id = p.id AND d.status IN ('open','investigating'))`
   ).all();
   for (const p of waiting) {
-    if (age(p.departed_at) >= 24 * H && !p.confirm_reminder_sent_at) {
+    if (age(p.departed_at) >= remindH * H && !p.confirm_reminder_sent_at) {
       const c = await db.prepare('UPDATE projects SET confirm_reminder_sent_at = CURRENT_TIMESTAMP WHERE id = ? AND confirm_reminder_sent_at IS NULL').run(p.id);
       if (c.changes === 1) { await sendWorkFinished(p.id, { reminder: true }); out.confirm_reminders++; }
     }
-    if (age(p.departed_at) >= 72 * H && !p.confirm_escalated_at) {
+    if (age(p.departed_at) >= escalateH * H && !p.confirm_escalated_at) {
       const c = await db.prepare('UPDATE projects SET confirm_escalated_at = CURRENT_TIMESTAMP WHERE id = ? AND confirm_escalated_at IS NULL').run(p.id);
       if (c.changes === 1) {
-        await emailAdmins(`Customer has not confirmed — project #${p.id}`, 'The pro finished 3 days ago and the customer has not confirmed or reported a problem. Please contact them from Messages.', [['Project', `#${p.id}`]]);
+        await emailAdmins(`Customer has not confirmed — project #${p.id}`, `The pro finished ${escalateH} hours ago and the customer has not confirmed or reported a problem. Please contact them from Messages.`, [['Project', `#${p.id}`]]);
         out.escalations++;
       }
     }
@@ -308,7 +313,7 @@ async function runLifecycleEmails({ now = new Date() } = {}) {
        AND NOT EXISTS (SELECT 1 FROM reviews r WHERE r.project_id = p.id)`
   ).all();
   for (const r of noReview) {
-    if (age(r.signed_at) < 72 * H) continue;
+    if (age(r.signed_at) < reviewD * 24 * H) continue;
     const c = await db.prepare('UPDATE projects SET review_reminder_sent_at = CURRENT_TIMESTAMP WHERE id = ? AND review_reminder_sent_at IS NULL').run(r.id);
     if (c.changes !== 1) continue;
     const pt = await parties(r.id);

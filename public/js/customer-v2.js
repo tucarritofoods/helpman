@@ -4,33 +4,7 @@
 
   function money(cents) { return HP.fmtMoney(Number(cents || 0)); }
 
-  function addOverviewTab() {
-    const tabs = document.getElementById('portal-tabs');
-    if (!tabs || document.querySelector('[data-tab="overview"]')) return;
-
-    const btn = document.createElement('button');
-    btn.className = 'tab';
-    btn.dataset.tab = 'overview';
-    btn.setAttribute('role','tab');
-    btn.textContent = 'Overview';
-    tabs.insertBefore(btn, tabs.firstChild);
-
-    const panel = document.createElement('section');
-    panel.className = 'tab-panel';
-    panel.id = 'panel-overview';
-    panel.setAttribute('role','tabpanel');
-    panel.innerHTML = '<div id="hm-command-center"><p class="muted">Loading your Helpman command center…</p></div>';
-    tabs.parentNode.insertBefore(panel, tabs.nextElementSibling);
-
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('#portal-tabs .tab').forEach(x => x.classList.toggle('active', x === btn));
-      document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-overview'));
-      loadCommandCenter();
-    });
-
-    // Make Overview the first view.
-    btn.click();
-  }
+  // Corte 6.2: the Overview tab is part of customer.html now; this file only fills it.
 
   async function loadCommandCenter() {
     const box = document.getElementById('hm-command-center');
@@ -43,12 +17,28 @@
 
       const active = projects.filter(p => !['completed','cancelled'].includes(p.stage));
       const completed = projects.filter(p => p.stage === 'completed');
-      const actionMilestones = active.flatMap(p => (p.milestones || []).filter(m => m.status === 'completed' && m.customer_approval === 'pending').map(m => ({p,m})));
+      const svc = (p) => (p.job && p.job.service_type ? p.job.service_type.charAt(0).toUpperCase() + p.job.service_type.slice(1).replace(/_/g, ' ') : 'Project');
+      const depositPaid = (p) => (p.payments || []).some(x => x.kind === 'deposit' && ['paid','recorded'].includes(x.status));
+      // What the customer sees as the state of each project (plain words, not internal stages).
+      const label = (p) => {
+        if (p.stage === 'assigned' && !depositPaid(p)) return 'Waiting for your deposit';
+        if (p.stage === 'assigned' && (!p.contractor_id || p.contractor_status !== 'accepted')) return 'Finding your pro';
+        if (p.stage === 'review' && p.departed_at) return 'Finished — please confirm';
+        return HP.PROJECT_STAGE[p.stage] || p.stage;
+      };
+      // The next steps that are the customer's to take.
+      const todo = [];
+      jobs.filter(j => j.status === 'quote_sent').forEach(j => todo.push({ title: `Your quote is ready — ${HP.esc(j.service_type || 'request')}`, sub: `Request #${j.id}`, cta: 'Review quote', tab: 'requests' }));
+      active.filter(p => p.stage === 'assigned' && !depositPaid(p)).forEach(p => todo.push({ title: `Pay the deposit to book — ${HP.esc(svc(p))}`, sub: `Project #${p.id}`, cta: 'Pay deposit', tab: 'projects' }));
+      active.filter(p => p.stage === 'review' && p.departed_at).forEach(p => todo.push({ title: `Your pro finished — ${HP.esc(svc(p))}`, sub: 'Check the photos and confirm the work', cta: 'Confirm', tab: 'projects' }));
+      projects.filter(p => ['requires_action','failed','needs_payment'].includes(p.balance_charge_status)).forEach(p => todo.push({ title: `Remaining balance to pay — ${HP.esc(svc(p))}`, sub: `Project #${p.id}`, cta: 'Pay now', tab: 'projects' }));
+      active.flatMap(p => (p.milestones || []).filter(m => m.status === 'completed' && m.customer_approval === 'pending').map(m => ({p,m})))
+        .forEach(({p,m}) => todo.push({ title: HP.esc(m.title), sub: `Project #${p.id} — approve this step`, cta: 'Review', tab: 'projects' }));
 
       box.innerHTML = `
         <div class="hm-cc-stats">
+          <div class="hm-cc-stat"><span>To do</span><strong>${todo.length}</strong></div>
           <div class="hm-cc-stat"><span>Active projects</span><strong>${active.length}</strong></div>
-          <div class="hm-cc-stat"><span>Needs approval</span><strong>${actionMilestones.length}</strong></div>
           <div class="hm-cc-stat"><span>Completed</span><strong>${completed.length}</strong></div>
           <div class="hm-cc-stat"><span>Requests</span><strong>${jobs.length}</strong></div>
         </div>
@@ -58,21 +48,20 @@
         </div>`;
 
       const actions = document.getElementById('hm-actions');
-      if (!actionMilestones.length) actions.innerHTML = '<p class="muted">Nothing needs your approval right now.</p>';
-      else actions.innerHTML = actionMilestones.map(({p,m}) =>
-        `<div class="hm-action-row"><div><strong>${HP.esc(m.title)}</strong><div class="small muted">Project #${p.id}</div></div><button class="btn btn-primary btn-sm" data-open-project="${p.id}">Review</button></div>`
-      ).join('');
+      actions.innerHTML = todo.length ? todo.map(t =>
+        `<div class="hm-action-row"><div><strong>${t.title}</strong><div class="small muted">${t.sub}</div></div><button class="btn btn-primary btn-sm" data-go="${t.tab}">${t.cta}</button></div>`
+      ).join('') : '<p class="muted">You are all set — nothing to do right now.</p>';
 
       const list = document.getElementById('hm-active-projects');
       if (!active.length) list.innerHTML = '<p class="muted">No active projects.</p>';
       else list.innerHTML = active.map(p => `
-        <button class="hm-project-summary" data-project-id="${p.id}">
-          <span><strong>Project #${p.id}</strong><small>${HP.PROJECT_STAGE[p.stage] || p.stage}</small></span>
+        <button class="hm-project-summary" data-go="projects">
+          <span><strong>${HP.esc(svc(p))}</strong><small>${HP.esc(label(p))} · #${p.id}</small></span>
           <span>${money(p.customer_price_cents)} →</span>
         </button>`).join('');
 
-      box.querySelectorAll('[data-project-id],[data-open-project]').forEach(el => el.addEventListener('click', () => {
-        document.querySelector('#portal-tabs .tab[data-tab="projects"]').click();
+      box.querySelectorAll('[data-go]').forEach(el => el.addEventListener('click', () => {
+        document.querySelector(`#portal-tabs .tab[data-tab="${el.dataset.go}"]`).click();
       }));
     } catch (e) {
       box.innerHTML = `<div class="banner banner-warn">${HP.esc(HP.friendlyMessage(e))}</div>`;
@@ -188,8 +177,8 @@
     } catch(e) { out.innerHTML = `<p class="muted">${HP.esc(HP.friendlyMessage(e))}</p>`; }
   }
 
+  window.HMCustomer = { loadCommandCenter };
   document.addEventListener('DOMContentLoaded', () => {
-    addOverviewTab();
     enhanceProjectCards();
   });
 })();

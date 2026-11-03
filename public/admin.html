@@ -200,6 +200,7 @@
         <div class="section-head">
           <h2>Contractor payouts</h2>
           <div class="btn-row">
+            <input type="search" id="po-q" placeholder="Search pro or #project" aria-label="Search payouts" style="min-width:200px">
             <select id="po-filter" aria-label="Filter payouts by status">
               <option value="">All</option><option value="pending">Pending</option><option value="approved">Approved</option>
               <option value="paid">Paid</option><option value="cancelled">Cancelled</option>
@@ -219,6 +220,7 @@
         <div class="section-head">
           <h2>Collections</h2>
           <div class="btn-row">
+            <input type="search" id="co-q" placeholder="Search client or #project" aria-label="Search collections" style="min-width:200px">
             <select id="co-filter" aria-label="Filter by status">
               <option value="">All</option><option value="overdue">Overdue</option><option value="due">Due</option>
               <option value="deposit_unpaid">Deposit not paid</option><option value="not_ready">Not payable yet</option><option value="in_dispute">In dispute</option>
@@ -257,7 +259,7 @@
         <div id="plugs-body"><p class="muted">Loading…</p></div>
       </div>
       <div class="section">
-        <div class="section-head"><h2>Business rules — money</h2></div>
+        <div class="section-head"><h2>Business rules</h2></div>
         <p class="small muted">The deposit, the payout hold and the cancellation / no-show values. Values marked <strong>Owner decision</strong> are still the safe default (full refund) until you set them.</p>
         <div id="rules-body"><p class="muted">Loading…</p></div>
       </div>
@@ -322,6 +324,7 @@
   <script src="js/plugs-v1.js" defer></script>
   <script src="js/clients-v1.js" defer></script>
   <script src="js/campaigns-v1.js" defer></script>
+  <script src="js/pros-v1.js" defer></script>
   <script>
   // Helpman — admin dashboard.
   (function () {
@@ -333,6 +336,20 @@
     const loaded = {};
     const toCents = (dollars) => Math.round(Number(dollars) * 100);
 
+    // Client name that opens the client profile (Clients tab module), when the viewer can see clients.
+    function clientLink(id, name) {
+      const n = HP.esc(name || '—');
+      return id && window.openClientProfile ? `<button type="button" class="linklike" data-client-link="${Number(id)}" style="background:none;border:0;padding:0;color:var(--navy);font-weight:600;cursor:pointer;text-align:left">${n}</button>` : n;
+    }
+    function wireClientLinks(box) {
+      box.querySelectorAll('[data-client-link]').forEach((b) => b.addEventListener('click', () => window.openClientProfile(Number(b.dataset.clientLink))));
+    }
+    // Live text filter over a rendered table (rows whose text does not match are hidden).
+    function tableFilter(input, box) {
+      const q = input.value.trim().toLowerCase().replace(/^#/, '');
+      box.querySelectorAll('tbody tr').forEach((tr) => { tr.hidden = !!q && !tr.textContent.toLowerCase().includes(q); });
+    }
+    const PRO_LIFECYCLE = { verification: 'In verification', new_active: 'New pro', active: 'Active', top_performer: 'Top performer', suspended: 'Suspended', rejected: 'Not approved', applicant: 'Applicant' };
     const DISPUTE_REASON = { quality: 'Quality of the work', incomplete: 'Work incomplete', no_show: 'No-show', damage: 'Damage', billing: 'Billing / price', other: 'Other' };
     // ---------- tabs ----------
     // Corte 6: one handler for every tab (the menu used to break when other scripts added tabs),
@@ -462,6 +479,7 @@
       if (!loaded.coWired) {
         loaded.coWired = true;
         document.getElementById('co-filter').addEventListener('change', renderCollections);
+        document.getElementById('co-q').addEventListener('input', (e) => tableFilter(e.target, document.getElementById('co-list')));
         document.getElementById('co-bulk').addEventListener('click', async (ev) => {
           if (!window.confirm('Send a reminder to every overdue customer who is eligible?')) return;
           HP.busy(ev.target, true, 'Sending…');
@@ -489,13 +507,15 @@
       box.innerHTML = `<div class="table-scroll"><table><thead><tr><th>Project</th><th>Customer</th><th>Balance</th><th>Status</th><th>Reminders</th><th></th></tr></thead><tbody>
         ${d.items.map((r) => `<tr data-pid="${r.project_id}">
           <td>#${r.project_id} <span class="small muted">${HP.esc(r.service_type || '')}</span></td>
-          <td>${HP.esc(r.customer_name || '')}<div class="small muted">${HP.esc(r.customer_email || '')}</div></td>
+          <td>${clientLink(r.customer_id, r.customer_name)}<div class="small muted">${HP.esc(r.customer_email || '')}</div></td>
           <td><strong>${HP.fmtMoney(r.status === 'deposit_unpaid' ? r.deposit_cents : r.balance_cents)}</strong><div class="small muted">of ${HP.fmtMoney(r.price_cents)}</div></td>
           <td>${HP.badge(CO_LABEL[r.status] + (r.days_overdue ? ' · ' + r.days_overdue + ' d' : ''), CO_KIND[r.status] || 'muted')}</td>
           <td class="small">${r.reminders ? r.reminders + ' sent<br>last ' + HP.fmtDateTime(r.last_reminder_at) : '—'}</td>
           <td><button class="btn btn-outline btn-sm co-remind" type="button" ${r.can_remind.ok ? '' : 'disabled'} title="${r.can_remind.ok ? 'Email the customer' : HP.esc(r.can_remind.reason)}">Send reminder</button>
             ${['due', 'overdue'].includes(r.status) ? '<button class="btn btn-outline btn-sm co-charge" type="button" title="Charge the balance to the card saved with the deposit">Charge saved card</button>' : ''}</td></tr>`).join('')}
         </tbody></table></div>`;
+      wireClientLinks(box);
+      tableFilter(document.getElementById('co-q'), box);
       box.querySelectorAll('tr[data-pid]').forEach((tr) => {
         const b = tr.querySelector('.co-remind');
         if (b) b.addEventListener('click', async () => {
@@ -527,11 +547,12 @@
       try { rows = await HP.api('GET', '/disputes' + (st ? '?status=' + st : '')); }
       catch (e) { box.innerHTML = `<p class="muted">${HP.esc(HP.friendlyMessage(e))}</p>`; return; }
       if (!rows.length) { box.innerHTML = '<p class="muted">No disputes here. 🎉</p>'; document.getElementById('dp-detail').innerHTML = ''; return; }
-      box.innerHTML = `<div class="table-scroll"><table><thead><tr><th>#</th><th>Project</th><th>Opened by</th><th>Reason</th><th>Status</th><th>Opened</th><th></th></tr></thead><tbody>
-        ${rows.map((r) => `<tr><td>${r.id}</td><td>#${r.project_id}</td><td>${HP.esc(r.opened_by_role)}</td><td>${HP.esc(DISPUTE_REASON[r.reason] || r.reason)}</td>
+      box.innerHTML = `<div class="table-scroll"><table><thead><tr><th>#</th><th>Project</th><th>Client</th><th>Opened by</th><th>Reason</th><th>Status</th><th>Opened</th><th></th></tr></thead><tbody>
+        ${rows.map((r) => `<tr><td>${r.id}</td><td>#${r.project_id} <span class="small muted">${HP.esc(r.service_type || '')}</span></td><td>${clientLink(r.customer_id, r.customer_name)}</td><td>${HP.esc(r.opened_by_role)}</td><td>${HP.esc(DISPUTE_REASON[r.reason] || r.reason)}</td>
           <td>${HP.badge(r.status, DP_KIND[r.status] || 'muted')}</td><td class="small">${HP.fmtDateTime(r.created_at)}</td>
           <td><button class="btn btn-outline btn-sm dp-open" data-id="${r.id}" type="button">Open</button></td></tr>`).join('')}</tbody></table></div>`;
       box.querySelectorAll('.dp-open').forEach((b) => b.addEventListener('click', () => showDispute(b.dataset.id)));
+      wireClientLinks(box);
     }
 
     async function showDispute(id) {
@@ -814,6 +835,7 @@
       if (!loaded.payoutsWired) {
         loaded.payoutsWired = true;
         document.getElementById('po-filter').addEventListener('change', renderPayouts);
+        document.getElementById('po-q').addEventListener('input', (e) => tableFilter(e.target, document.getElementById('po-list')));
         document.getElementById('po-backfill').addEventListener('click', async (ev) => {
           HP.busy(ev.target, true, 'Working…');
           try { const r = await HP.api('POST', '/payables/generate'); HP.toast(r.created ? `${r.created} payout(s) created.` : 'Nothing missing.', 'ok'); renderPayouts(); }
@@ -1233,14 +1255,15 @@
         box.innerHTML = `<div class="table-scroll"><table>
           <thead><tr><th>Contractor</th><th>City</th><th>Lifecycle</th><th class="num">Score</th><th class="num">Rating</th><th class="num">Jobs</th><th>Retention</th></tr></thead>
           <tbody>${contractorsCache.map((c) => `<tr>
-            <td><strong>${HP.esc(c.legal_name || c.user_name || '')}</strong> ${c.provider_type === 'employee' ? HP.badge('company technician', 'info') : ''}<br><span class="small muted">${HP.esc(c.user_name || '')} · ${HP.esc(c.email || '')}</span></td>
+            <td><button type="button" data-open-pro="${c.id}" style="background:none;border:0;padding:0;color:var(--navy);font-weight:700;cursor:pointer;text-align:left">${HP.esc(c.legal_name || c.user_name || '')}</button> ${c.provider_type === 'employee' ? HP.badge('company technician', 'info') : ''}<br><span class="small muted">${HP.esc(c.user_name || '')} · ${HP.esc(c.email || '')}</span></td>
             <td>${HP.esc(c.city || '—')}</td>
-            <td>${HP.badge(c.lifecycle || c.status, c.status === 'active' ? 'ok' : 'warn')}</td>
+            <td>${HP.badge(PRO_LIFECYCLE[c.lifecycle] || c.lifecycle || c.status, c.status === 'active' ? 'ok' : 'warn')}</td>
             <td class="num">${c.score || 0}</td>
             <td class="num">${Number(c.rating_avg || 0).toFixed(1)}</td>
             <td class="num">${c.jobs_completed || 0}</td>
             <td>${c.retention_at_risk ? HP.badge('At risk', 'warn') : '<span class="muted small">OK</span>'}</td>
           </tr>`).join('')}</tbody></table></div>`;
+        box.querySelectorAll('[data-open-pro]').forEach((b) => b.addEventListener('click', () => window.openProProfile && window.openProProfile(Number(b.dataset.openPro))));
         paintVerifyOptions();
       } catch (e) {
         box.innerHTML = `<div class="banner banner-warn">Could not load contractors: ${HP.esc(HP.friendlyMessage(e))}</div>`;

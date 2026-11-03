@@ -57,6 +57,13 @@ router.patch('/me', authRequired, requireRole('contractor'), ah(async (req, res)
   if (b.service_radius_miles !== undefined && !(Number(b.service_radius_miles) >= 1 && Number(b.service_radius_miles) <= 500)) {
     errors.service_radius_miles = 'Radius must be 1-500 miles.';
   }
+  // Specialties are always stored as a JSON list of trades (a typed "painting, drywall" too).
+  if (b.specialties !== undefined) {
+    const list = (Array.isArray(b.specialties) ? b.specialties : String(b.specialties).split(','))
+      .map((x) => String(x).trim().toLowerCase()).filter(Boolean);
+    if (list.length > 20 || list.some((x) => x.length > 40)) errors.specialties = 'Up to 20 trades.';
+    else b.specialties = JSON.stringify([...new Set(list)]);
+  }
   if (failIfErrors(res, errors)) return;
   const fields = ['city', 'service_base', 'service_radius_miles', 'years_experience', 'specialties', 'license_number', 'insurance_info'];
   const sets = [], vals = [];
@@ -243,6 +250,38 @@ router.patch('/:id/location', authRequired, requireStaff('dispatch'), ah(async (
   await db.prepare('UPDATE contractors SET lat = ?, lng = ? WHERE id = ?').run(lat, lng, c.id);
   await auditLog(req.user.id, 'contractor.located', 'contractors', c.id, `lat ${lat}, lng ${lng}`);
   res.json({ id: c.id, lat, lng });
+}));
+
+// ---- Corte 6.2: the pro's profile for the team (Contractors › open a pro) ----
+// Same access as the pro list ('read'). Amounts (job budgets, payouts) only for roles with
+// 'costs' (owner, finance, dispatch) — support never sees what a pro is paid.
+router.get('/:id/profile', authRequired, requireStaff('read'), ah(async (req, res) => {
+  const c = await db.prepare('SELECT * FROM contractors WHERE id = ?').get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Contractor not found.' });
+  const { can } = require('../services/permissions');
+  const money = can(req.user, 'costs');
+  const summary = await enriched(c);
+  delete summary.stripe_account_id;
+  const jobs = await db.prepare(
+    `SELECT p.id, p.stage, p.contractor_status, p.scheduled_start, p.arrival_window, p.created_at, p.contractor_cost_cents, j.service_type, j.city, j.zip
+     FROM projects p JOIN job_requests j ON j.id = p.job_request_id WHERE p.contractor_id = ? ORDER BY p.id DESC LIMIT 200`
+  ).all(c.id);
+  const offers = await db.prepare(`SELECT project_id, event_type, detail, created_at FROM contractor_offer_events WHERE contractor_id = ? ORDER BY id DESC LIMIT 200`).all(c.id);
+  const count = (t) => offers.filter((o) => o.event_type === t).length;
+  const documents = await db.prepare(`SELECT id, doc_type, label, document_number, issuer, expires_on, status, rejection_reason, reviewed_at, created_at FROM contractor_documents WHERE contractor_id = ? ORDER BY id DESC`).all(c.id);
+  const availability = await db.prepare(`SELECT weekday, start_time, end_time, is_available FROM contractor_availability WHERE contractor_id = ? ORDER BY weekday`).all(c.id);
+  const blackouts = await db.prepare(`SELECT start_date, end_date, reason FROM contractor_blackouts WHERE contractor_id = ? ORDER BY start_date DESC LIMIT 50`).all(c.id);
+  const reviews = await db.prepare(`SELECT project_id, rating, comment, created_at FROM reviews WHERE contractor_id = ? ORDER BY id DESC LIMIT 50`).all(c.id);
+  const disputes = await db.prepare(`SELECT d.id, d.project_id, d.reason, d.status, d.opened_by_role, d.created_at FROM disputes d JOIN projects p ON p.id = d.project_id WHERE p.contractor_id = ? ORDER BY d.id DESC LIMIT 50`).all(c.id);
+  const payouts = money
+    ? await db.prepare(`SELECT project_id, payable_cents, status, due_at, paid_at, paid_method, transfer_id IS NOT NULL AS via_stripe FROM contractor_payables WHERE contractor_id = ? ORDER BY id DESC LIMIT 200`).all(c.id)
+    : null;
+  res.json({
+    summary, can_see_money: money,
+    jobs: jobs.map((j) => (money ? j : { ...j, contractor_cost_cents: undefined })),
+    offers: { counts: { offered: count('offered'), accepted: count('accepted'), declined: count('declined'), expired: count('expired') }, events: offers },
+    documents, availability, blackouts, reviews, disputes, payouts,
+  });
 }));
 
 router.get('/:id', authRequired, requireStaff('read'), ah(async (req, res) => {

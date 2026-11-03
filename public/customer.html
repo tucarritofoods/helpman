@@ -19,13 +19,18 @@
     <p class="page-sub">Your requests, active projects, and referral rewards — all in one place.</p>
 
     <div class="tabs" role="tablist" id="portal-tabs">
-      <button class="tab active" data-tab="requests" role="tab">My requests</button>
+      <button class="tab active" data-tab="overview" role="tab">Overview</button>
+      <button class="tab" data-tab="requests" role="tab">My requests</button>
       <button class="tab" data-tab="projects" role="tab">My projects</button>
       <button class="tab" data-tab="messages" role="tab">Messages</button>
       <button class="tab" data-tab="referrals" role="tab">Referrals</button>
     </div>
 
-    <section class="tab-panel active" id="panel-requests" role="tabpanel">
+    <section class="tab-panel active" id="panel-overview" role="tabpanel">
+      <div id="hm-command-center"><p class="muted">Loading…</p></div>
+    </section>
+
+    <section class="tab-panel" id="panel-requests" role="tabpanel">
       <div id="requests-list"><p class="muted">Loading your requests…</p></div>
     </section>
 
@@ -104,13 +109,20 @@
     'use strict';
     HP.mountHeader('portal');
 
-    document.querySelectorAll('#portal-tabs .tab').forEach((t) => {
-      t.addEventListener('click', () => {
-        document.querySelectorAll('#portal-tabs .tab').forEach((x) => x.classList.toggle('active', x === t));
-        document.querySelectorAll('.tab-panel').forEach((p) =>
-          p.classList.toggle('active', p.id === 'panel-' + t.dataset.tab));
-      });
-    });
+    // Corte 6.2: one handler for every tab (an older script used to inject "Overview"),
+    // and the open tab is kept in the address (#projects…).
+    function showTab(name, push) {
+      const t = document.querySelector(`#portal-tabs .tab[data-tab="${CSS.escape(name || '')}"]`);
+      if (!t) return false;
+      document.querySelectorAll('#portal-tabs .tab').forEach((x) => { x.classList.toggle('active', x === t); x.setAttribute('aria-selected', x === t); });
+      document.querySelectorAll('main .tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'panel-' + name));
+      if (push !== false && location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
+      if (name === 'overview' && window.HMCustomer) window.HMCustomer.loadCommandCenter();
+      return true;
+    }
+    document.getElementById('portal-tabs').addEventListener('click', (e) => { const t = e.target.closest('.tab'); if (t) showTab(t.dataset.tab); });
+    window.addEventListener('hashchange', () => showTab(location.hash.slice(1), false));
+    document.addEventListener('DOMContentLoaded', () => { if (!showTab(location.hash.slice(1), false)) showTab('overview', false); });
 
     let reviewsByProject = {};
 

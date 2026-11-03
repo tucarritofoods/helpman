@@ -229,19 +229,21 @@ const HP = (() => {
     const u = user();
     const header = document.getElementById('site-header');
     if (!header) return;
-    const links = [
-      { href: 'index.html', label: 'Home', id: 'home' },
-      { href: 'track.html', label: 'Track a job', id: 'track' },
-      { href: 'auth.html?tab=contractor', label: 'Join as a pro', id: 'contractor', cta: true },
-    ];
-    if (u && u.role) links.push({ href: portalLink(u.role), label: 'My portal', id: 'portal' });
+    // Signed in: the portal is what matters ("Track a job" and "Join as a pro" are for visitors).
+    const links = u && u.role
+      ? [{ href: 'index.html', label: 'Home', id: 'home', minor: true }, { href: portalLink(u.role), label: 'My portal', id: 'portal' }]
+      : [
+        { href: 'index.html', label: 'Home', id: 'home', minor: true },
+        { href: 'track.html', label: 'Track a job', id: 'track' },
+        { href: 'auth.html?tab=contractor', label: 'Join as a pro', id: 'contractor', cta: true },
+      ];
     header.innerHTML = `
       <div class="wrap header-inner">
         <a class="brand" href="index.html" aria-label="Helpman home">
           <img class="helpman-logo" src="img/helpman-logo.svg?v=20261006c" alt="Helpman — Home projects, handled.">
         </a>
         <nav class="main-nav" aria-label="Main">
-          ${links.map((l) => `<a href="${l.href}" class="${page === l.id ? 'active' : ''}${l.cta ? ' nav-cta' : ''}">${esc(l.label)}</a>`).join('')}
+          ${links.map((l) => `<a href="${l.href}" class="${page === l.id ? 'active' : ''}${l.cta ? ' nav-cta' : ''}${l.minor ? ' nav-minor' : ''}">${esc(l.label)}</a>`).join('')}
           ${u ? `<span class="nav-user">Hi, ${esc(u.name.split(' ')[0])}</span><button class="btn btn-ghost btn-sm" id="logout-btn">Log out</button>`
                : `<a href="auth.html" class="${page === 'auth' ? 'active' : ''}">Log in</a>`}
         </nav>
