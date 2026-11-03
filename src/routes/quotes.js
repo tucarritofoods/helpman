@@ -150,6 +150,10 @@ router.post('/:id/respond', authRequired, ah(async (req, res) => {
     return res.json({ accepted: false });
   }
 
+  // CRM: a blocked client cannot accept new work (declining is always allowed).
+  if (req.user.role === 'customer' && await require('../services/clients').isBlocked({ userId: req.user.id, email: job.email })) {
+    return res.status(403).json({ error: 'This account cannot accept quotes right now. Please contact Helpman support.', code: 'CLIENT_BLOCKED' });
+  }
   // Money-moving action: needs a verified email.
   if (!req.user.email_verified) {
     return res.status(403).json({ error: 'Please verify your email first. Check your inbox or request a new link.', code: 'EMAIL_NOT_VERIFIED' });

@@ -61,6 +61,10 @@
 
     <section class="tab-panel" id="panel-clients" role="tabpanel">
       <div class="section">
+        <div class="section-head"><h2>Clients</h2></div>
+        <div id="client-directory"><p class="muted">Loading clients…</p></div>
+      </div>
+      <div class="section">
         <div class="section-head"><h2>Lead pipeline</h2></div>
         <div class="pipeline" id="pipeline-cards"><p class="muted">Loading pipeline…</p></div>
       </div>
@@ -324,6 +328,7 @@
   <script src="js/admin-v5.js" defer></script>
   <script src="js/admin-v4.js" defer></script>
   <script src="js/plugs-v1.js" defer></script>
+  <script src="js/clients-v1.js" defer></script>
   <script>
   // Helpman — admin dashboard.
   (function () {
@@ -971,6 +976,7 @@
       sel.addEventListener('change', () => loadJobsTable(sel.value));
       document.getElementById('gen-tasks').addEventListener('click', generateTasks);
       document.getElementById('task-status-filter').addEventListener('change', loadTasks);
+      if (window.loadClientDirectory) window.loadClientDirectory();
       loadPipeline();
       loadJobsTable('');
       loadTasks();

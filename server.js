@@ -261,6 +261,7 @@ app.use('/api/customer-experience', require('./src/routes/customer-experience'))
 app.use('/api/contractors', require('./src/routes/contractors'));
 app.use('/api/contractor-ops', require('./src/routes/contractor-ops'));
 app.use('/api/crm', require('./src/routes/crm'));
+app.use('/api/clients', require('./src/routes/clients'));
 app.use('/api/operations', require('./src/routes/operations'));
 app.use('/api/campaigns', require('./src/routes/campaigns'));
 app.use('/api/reports', require('./src/routes/reports'));

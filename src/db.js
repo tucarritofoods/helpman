@@ -824,6 +824,34 @@ for (const [col, type] of [['arrived_at', 'TEXT'], ['departed_at', 'TEXT'], ['on
   if (!columnExists('projects', col)) db.exec(`ALTER TABLE projects ADD COLUMN ${col} ${type}`);
 }
 
+// ---- Corte 4: CRM Clients (tags, internal notes, client tasks) ----
+// Mirrored for PostgreSQL in src/db/migrations/015_crm_clients.sql.
+db.exec(`CREATE TABLE IF NOT EXISTS customer_tags (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  tag TEXT NOT NULL,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (user_id, tag)
+)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_customer_tags_tag ON customer_tags(tag)`);
+db.exec(`CREATE TABLE IF NOT EXISTS customer_notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  customer_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  author_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  kind TEXT NOT NULL DEFAULT 'note' CHECK (kind IN ('note','email')),
+  subject TEXT,
+  body TEXT NOT NULL,
+  pinned INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_customer_notes_customer ON customer_notes(customer_id)`);
+for (const [col, type] of [['customer_id', 'INTEGER REFERENCES users(id) ON DELETE CASCADE'], ['assigned_to', 'INTEGER REFERENCES users(id) ON DELETE SET NULL'],
+  ['created_by', 'INTEGER REFERENCES users(id) ON DELETE SET NULL'], ['notes', 'TEXT'], ['done_at', 'TEXT']]) {
+  if (!columnExists('followup_tasks', col)) db.exec(`ALTER TABLE followup_tasks ADD COLUMN ${col} ${type}`);
+}
+db.exec(`CREATE INDEX IF NOT EXISTS idx_followup_tasks_customer ON followup_tasks(customer_id)`);
+
 // ---- Migrate payments.provider CHECK to include 'stripe' (was manual/stripe_stub) ----
 // Also adds 'paid' to the status CHECK for Stripe-confirmed payments.
 // 2026-10-07: also adds 'simulated' provider for the test payment mode.

@@ -62,6 +62,10 @@ router.post('/', ah(async (req, res) => {
   if (b.urgency && !['standard', 'urgent'].includes(b.urgency)) errors.urgency = 'Invalid urgency.';
   if (!isNonEmpty(b.description, 2000)) errors.description = 'Please describe the work.';
   if (failIfErrors(res, errors)) return;
+  // CRM: a blocked client (account or same email) cannot open new requests.
+  if (await require('../services/clients').isBlocked({ userId: req.user && req.user.role === 'customer' ? req.user.id : null, email: b.email })) {
+    return res.status(403).json({ error: 'We cannot take new requests for this account. Please contact Helpman support.', code: 'CLIENT_BLOCKED' });
+  }
 
   const claimToken = crypto.randomBytes(16).toString('hex');
   const info = await db.prepare(
